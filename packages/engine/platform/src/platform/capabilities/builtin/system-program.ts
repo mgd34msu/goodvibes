@@ -403,18 +403,14 @@ export const SETUP_TOPIC_WORDS = {
     tui: 'Opens the form for storing a provider or channel key, and how keys are stored.',
     agent: 'Opens the Secrets tab of Permissions and safety, where a provider or channel key is stored.',
   },
-  // The four network topics and "Who can sign in here" open one control in both programs: Devices and network,
-  // Addresses and ports (`a` there makes the account that signs in from a browser or another device).
-  'local-only': { label: 'Only this computer', word: 'local-only', sentence: 'Opens Addresses and ports in Devices and network, where the daemon, web UI and webhook listeners are turned off so everything stays on this computer.', group: 'system' },
-  'browser': { label: 'Use it in a browser', word: 'browser', sentence: 'Opens Addresses and ports in Devices and network: the web UI switch, where it listens, and the account that signs in from a browser.', group: 'system' },
-  'other-devices': { label: 'Other devices', word: 'other-devices', sentence: 'Opens Addresses and ports in Devices and network: the addresses and ports your other devices reach, and the account that signs in from them.', group: 'devices' },
+  // The four network topics, "Who can sign in here" and "Safety" only open a place: they are rows of the Setup list that
+  // open it (terminal-shell setup-command.ts SETUP_PLACE_TOPICS), not capabilities.
   'connect-daemon': {
     label: 'A daemon elsewhere', word: 'connect-daemon', group: 'system',
     sentence: 'Opens where this program is pointed at a GoodVibes daemon on another computer (a form in the terminal app, the settings screen in the Agent); nothing on this computer is opened to the network.',
     tui: 'Opens the form for pointing this program at a GoodVibes daemon already running on another computer; nothing on this computer is opened to the network.',
     agent: 'Opens the settings screen at the address of the daemon this program reaches; nothing on this computer is opened to the network.',
   },
-  'webhooks': { label: 'Receive webhooks', word: 'webhooks', sentence: 'Opens Addresses and ports in Devices and network: the switch for receiving webhooks and events from other tools, and where it listens.', group: 'system' },
   'chat-apps': {
     label: 'Chat apps and services', word: 'chat-apps', group: 'messages',
     sentence: 'Opens where Slack, Discord, Telegram and the other chat apps and services are connected: a form in the terminal app, the settings screen in the Agent. The account that signs in from other devices is made in Devices and network, Addresses and ports.',
@@ -427,14 +423,12 @@ export const SETUP_TOPIC_WORDS = {
     tui: 'Opens the form for using Cloudflare for batch and remote work.',
     agent: 'Opens the Cloudflare settings tab of Devices and network, for batch and remote work.',
   },
-  'who-signs-in': { label: 'Who can sign in here', word: 'who-signs-in', sentence: 'Opens Addresses and ports in Devices and network, where the account that signs in to this GoodVibes from a browser or another device is made.', group: 'system' },
   'how-it-works': {
     label: 'When it asks', word: 'how-it-works', group: 'system',
     sentence: 'Opens where you choose how GoodVibes works with you (how much it tells you, how much guidance it gives, when it asks): a form in the terminal app, the settings screen in the Agent.',
     tui: 'Opens the form for how GoodVibes works with you: how much GoodVibes tells you, how much guidance it gives, and when it asks.',
     agent: 'Opens the settings screen at how GoodVibes works with you: how much it tells you, how much guidance it gives, and when it asks.',
   },
-  'safety': { label: 'Safety', word: 'safety', sentence: 'Opens Permissions and safety at the sandbox switch, beside the other safety settings.', group: 'safety' },
   'memory': {
     label: 'Memory and context', word: 'memory', group: 'memory',
     sentence: 'Opens where memory and keeping a long conversation in context are set up: a form in the terminal app, the settings screen in the Agent.',

@@ -39,6 +39,7 @@ import { RUNTIME_EVENT_DOMAINS } from '../runtime/events/index.js';
 import { readRequestedDomains } from '../control-plane/gateway-utils.js';
 import type { DistributedRuntimeManager } from '../runtime/remote/index.js';
 import { projectNamerOf, type CallerProjectVerdict, type ProjectNamer } from '../workspace/caller-project.js';
+import { PROJECT_FOLDER_NOT_REACHABLE, unreachableFolderWords } from '../workspace/unreachable-folder-words.js';
 import { extractForwardedClientIp } from '../runtime/network/index.js';
 import { clientAddressOf, isLocalOrigin, resolveClientAddress } from './client-address.js';
 import { requestTransport } from '../runtime/network/request-transport.js';
@@ -2088,6 +2089,10 @@ export class DaemonControlPlaneHelper {
             body: isRefusal(own) ? refusalErrorBody(own) : refusalBody(refusal.message, refusal.code, refusal.status),
           };
         }
+        // A read of a project whose folder cannot be reached now (a disk not mounted, a parent renamed) is not the daemon's
+        // fault: a sentence a person understands and a 503, the same for every method that reads that project's records.
+        const unreachable = unreachableFolderWords(error, (input.body as Record<string, unknown> | undefined)?.['workingDirectory']);
+        if (unreachable !== undefined) return { status: 503, ok: false, body: refusalBody(unreachable, PROJECT_FOLDER_NOT_REACHABLE, 503) };
         // redactSensitiveData outside classic mode answers only markers on its first call; local masking keeps the message readable.
         const message = redactDiagnosticText(summarizeError(error));
         return {

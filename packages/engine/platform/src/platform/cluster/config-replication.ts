@@ -73,9 +73,6 @@ import {
   wireReplicaDocument,
   withApplied,
   readReplicaAct,
-  withRecordedActsOnly,
-  CARRIED_ACT,
-  OLDER_RUN_ACT,
   type ConfigReplicaDocument,
   type ConfigReplicaEntry,
   type ConfigReplicaTombstone,
@@ -308,10 +305,9 @@ export class ConfigReplicationService {
     // until the next exchange replaces them, so nothing shared is missing between a restart and that exchange.
     // Changes made here are still held until that exchange (`inStep`), so none overwrites a newer group change.
     this.keptFromRecord = fromRecord && document.revision > 0;
-    // A copy a release that did not record who made a change wrote (3.5.0), read by this release for the first time:
-    // its upgrade. What it holds now is all the carry mark may ever apply to (`carryUnrecorded`), kept with it.
-    const upgrading = document.carried !== true && document.carryThrough === undefined;
-    this.document = this.publicDocument(upgrading ? { ...document, carryThrough: document.revision } : document);
+    // Every machine of the group is the same user, so no record of who made a change is needed and none is stamped on a
+    // copy read from disk (a 3.5.0 copy is taken as it is).
+    this.document = this.publicDocument(document);
     // Changes held before a restart are held again, for the same group only.
     for (const change of held) this.held.set(change.path, { kind: change.kind, secret: change.secret, applyLocal: change.applyLocal });
   }
@@ -462,72 +458,24 @@ export class ConfigReplicationService {
    * and it is kept and reported as a local difference until the owner
    * publishes it or accepts the group's value.
    */
-  /** Members that sent a change of their own recording who made it: they run a release that keeps the record. */
+  /**
+   * Members known to run an older release, members that recorded their own changes, members asked for their copy once
+   * and members' changes not taken. Every machine of the group is the same user and no change is refused for lacking a
+   * record of who made it, so nothing writes these any more; the status (`olderReleaseMembers`, `notTakenFrom`) and the
+   * screens' labels read them and so stay empty.
+   */
   private readonly peersRecordingActs = new Set<string>();
-  /** Members known to run an older release: their config messages do not say `actsRecorded`. */
   private readonly olderPeers = new Map<string, true>();
-  /**
-   * Older-release members already asked for their copy once, with the membership generation they had then: such a
-   * member's copy differs by design, so it is not asked again on every pass; asked again when its release changes
-   * (`handle`) or it rejoins (a new generation on the roster).
-   */
   private readonly askedOlder = new Map<string, number>();
-  /** Per member, its own changes not taken here because they record no one who made them (paths only). */
   private readonly unrecordedFrom = new Map<string, { paths: Set<string>; at: number }>();
-
-  /**
-   * A member's own changes that record no one who made them were not taken. Said once per member and path, in the log
-   * and in the status: either it runs an older release of GoodVibes (one that never records who made a change, such as
-   * 3.5.0), whose changes do not cross to this machine until it is upgraded while this machine's still reach it; or the
-   * change was made there outside its settings controls.
-   */
-  /**
-   * Paths the group holds a change for that was not taken here (it records no one): this machine's own value of such a
-   * path is never folded in as the group's (`reconcileLocalConfig`), so a refused change is never overwritten by it.
-   */
-  private readonly refusedPaths = new Set<string>();
-
-  private noteUnrecorded(from: string, changes: readonly { readonly path: string; readonly revision: number; readonly origin: string }[]): void {
-    for (const change of changes) this.refusedPaths.add(change.path);
-    // A change this copy already holds (the same path, revision and origin) is not missing here, only its record is:
-    // a machine put back to 3.5.0 writes its copy back without it.
-    const held = (change: { readonly path: string; readonly revision: number; readonly origin: string }): boolean =>
-      [...this.document.entries, ...this.document.tombstones].some((own) => own.path === change.path && own.revision === change.revision && own.origin === change.origin);
-    const paths = changes.filter((change) => !held(change)).map((change) => change.path);
-    if (paths.length === 0) return;
-    const kept = this.unrecordedFrom.get(from) ?? { paths: new Set<string>(), at: 0 };
-    const fresh = paths.filter((path) => !kept.paths.has(path));
-    for (const path of paths) kept.paths.add(path);
-    kept.at = this.host.now();
-    this.unrecordedFrom.set(from, kept);
-    if (fresh.length === 0) return;
-    const machine = (this.host.groupState()?.members ?? []).find((member) => member.nodeId === from)?.displayName ?? from;
-    this.host.logger.warn(this.peersRecordingActs.has(from)
-      ? `cluster: changes made on ${machine} outside its settings controls record no one who made them, so this machine did not take them`
-      : `cluster: ${machine} runs an older release of GoodVibes that does not record who made a change, so its setting and credential changes do not cross to this machine until it is upgraded; changes made here still reach it`,
-    { path: fresh.slice(0, 8).join(', ') + (fresh.length > 8 ? ` and ${fresh.length - 8} more` : '') });
-  }
-
-  /** A member's change of these paths was taken with its record: what was said not taken for them is no longer so. */
-  private noteRecorded(from: string, paths: readonly string[]): void {
-    const kept = this.unrecordedFrom.get(from);
-    if (!kept) return;
-    for (const path of paths) kept.paths.delete(path);
-    if (kept.paths.size === 0) this.unrecordedFrom.delete(from);
-  }
 
   /** The owner's act that started or joined the group here: the settings in force become the group's under it. */
   private seedAct: ReplicaAct | undefined;
   /** The same act, kept while this process runs: a credential held here that the group has no record of is seeded under it. */
   private startAct: ReplicaAct | undefined;
 
-  /** When a 3.5.0 daemon put back on this machine last wrote the group's settings since the upgrade (group-runtime option). */
-  private olderReleaseRanAt: number | undefined;
-
-  /** Note that 3.5.0 ran on this machine since the upgrade: its own changes from that run are marked the owner's once. */
-  noteOlderReleaseRun(at: number | undefined): void {
-    this.olderReleaseRanAt = at;
-  }
+  /** Kept for its caller (group-runtime option) and doing nothing: a run of 3.5.0 on this machine is not told apart or marked. */
+  noteOlderReleaseRun(_at: number | undefined): void {}
 
   /** Record the act that started or joined the group on this machine (its next reconcile seeds the group's settings under it). */
   seedWith(act: ReplicaAct | undefined): void {
@@ -542,8 +490,6 @@ export class ConfigReplicationService {
     let next = this.document;
     const changed: string[] = [];
     const agreed: Record<string, number> = {};
-    // A run of 3.5.0 put back on this machine since the upgrade that this record has not taken in yet.
-    const olderRun = this.olderReleaseRanAt !== undefined && (this.document.olderReleaseRun ?? 0) < this.olderReleaseRanAt ? this.olderReleaseRanAt : undefined;
     const deleted = new Set(next.tombstones.map((entry) => entry.path));
     const pending = this.pendingEffects();
     const unapplied = new Set([...pending.sets.map((entry) => entry.path), ...pending.deletes.map((entry) => entry.path)]);
@@ -562,10 +508,7 @@ export class ConfigReplicationService {
         this.localDifferences.delete(path);
         continue;
       }
-      // A run of the older release since the upgrade (released 3.5.0 put back on this machine, the owner's own act on
-      // it): what changed here then is this machine's change made in that run, decided below.
-      const fromOlderRun = olderRun !== undefined;
-      if (entry && entry.origin !== this.host.nodeId && !fromOlderRun) {
+      if (entry && entry.origin !== this.host.nodeId) {
         // Applied here and changed since: an edit made here that nothing announced.
         if (this.localDifferences.get(path)?.revision !== entry.revision) {
           this.localDifferences.set(path, { origin: entry.origin, revision: entry.revision });
@@ -573,24 +516,14 @@ export class ConfigReplicationService {
         }
         continue;
       }
-      // A path the group has no entry for yet takes this machine's value as the group's when the owner started or
-      // joined the group here: that act is what made it the group's (`seedWith`). Any other is an edit nothing
-      // announced, recorded with no one who made it, which the other machines do not take.
-      // A path the group holds a change for that was not taken here is not folded in: that would overwrite it.
-      if (entry === null && this.refusedPaths.has(path)) continue;
-      // This machine's own change made while it ran 3.5.0 after the upgrade (it is in its settings, not in this record):
-      // it did not cross while 3.5.0 ran; now that this machine is upgraded again it crosses, recorded as the owner's act
-      // made on this machine (gate-review-6 G14, decided). The carry mark of the first upgrade is not applied again:
-      // only this run's changes, on this machine, at this upgrade.
-      const act = entry === null && this.seedAct ? this.seedAct : fromOlderRun ? OLDER_RUN_ACT : undefined;
-      if (act === OLDER_RUN_ACT) this.host.logger.info('cluster: a shared setting changed here while this machine ran an older release is sent to the group as your act made on this machine', { path });
-      if (!act) this.host.logger.warn('cluster: a shared setting changed here records no one who made it (it was not changed through the daemon\'s settings controls), so the other machines will not take it', { path });
+      // A path the group has no entry for yet takes this machine's value as the group's (the group's own act when the
+      // user started or joined it here, `seedWith`; a record of who made it is optional and nothing depends on it).
+      const act = entry === null && this.seedAct ? this.seedAct : undefined;
       next = putReplicaEntry(next, { path, value, origin: this.host.nodeId, at: this.host.now(), ...(act ? { act } : {}) });
       changed.push(path);
       agreed[path] = next.revision;
     }
-    if (olderRun !== undefined) next = { ...next, olderReleaseRun: olderRun };
-    if (changed.length === 0 && Object.keys(agreed).length === 0 && olderRun === undefined) return;
+    if (changed.length === 0 && Object.keys(agreed).length === 0) return;
     // One write for the batch: the new entries and the applied state together.
     this.commit(withApplied(next, agreed), check);
     if (changed.length > 0) this.seedAct = undefined;
@@ -657,8 +590,6 @@ export class ConfigReplicationService {
     const value = config?.get(path);
     if (!isReplicableValue(value)) return;
     if (!this.inStep) { this.hold(path, { kind: 'set', secret: false, applyLocal: false, ...(act ? { act } : {}) }); return; }
-    // A change with no recorded actor (an edit outside the daemon's settings controls) is not taken by the others.
-    if (!act) this.host.logger.warn('cluster: a shared setting changed here records no one who made it (it was not changed through the daemon\'s settings controls), so the other machines will not take it', { path });
     const next = this.appliedHere(putReplicaEntry(this.document, { path, value, origin: this.host.nodeId, at: this.host.now(), ...(act ? { act } : {}) }), path);
     this.commit(next, check);
     await this.broadcastDelta(next, [path], check);
@@ -680,7 +611,6 @@ export class ConfigReplicationService {
     if (value === null) { if (!seed) await this.publishDelete(configPath, true, check, false, act); return; }
     // A seed is the group's first record of a credential held here when the owner started or joined it (`seedWith`).
     const recorded = act ?? (seed ? this.seedAct ?? this.startAct : undefined);
-    if (!recorded) this.host.logger.warn('cluster: a credential changed here records no one who made it (it was not changed through the daemon\'s settings controls), so the other machines will not take it', { path: configPath });
     await this.publishSecret(configPath, value, check, recorded);
   }
 
@@ -777,10 +707,8 @@ export class ConfigReplicationService {
 
   private async send(check: () => void, type: string, body: Record<string, unknown>): Promise<void> {
     check();
-    // Says this machine records who made each change (a release older than this one, such as 3.5.0, never sends it
-    // and ignores it), so a member tells an older release from a change made outside the settings controls.
-    // A snapshot part's body is read field for field (config-snapshot-transfer.ts, by 3.5.0 too): it goes as it is.
-    await this.host.send(type, type === CONFIG_MESSAGE_TYPES.snapshotPart ? body : { ...body, actsRecorded: true });
+    // Sent as it is: a member's release is not told apart (every machine of the group is the same user).
+    await this.host.send(type, body);
   }
 
   private async broadcastDelta(document: ConfigReplicaDocument, paths: readonly string[], check: () => void): Promise<void> {
@@ -882,14 +810,6 @@ export class ConfigReplicationService {
   /** Route a config-replication datagram that already verified under the group key. */
   async handle(envelope: ClusterEnvelope): Promise<void> {
     if (envelope.nodeId === this.host.nodeId) return;
-    // What the member runs now: a machine put back to an older release stops saying it (a snapshot part never says it).
-    if (envelope.type !== CONFIG_MESSAGE_TYPES.snapshotPart) {
-      const older = envelope.body['actsRecorded'] !== true;
-      // Its release changed: it is asked for its copy again (`notePeerReplica`).
-      if (older !== this.olderPeers.has(envelope.nodeId)) this.askedOlder.delete(envelope.nodeId);
-      if (older) { this.peersRecordingActs.delete(envelope.nodeId); this.olderPeers.set(envelope.nodeId, true); }
-      else { this.peersRecordingActs.add(envelope.nodeId); this.olderPeers.delete(envelope.nodeId); }
-    }
     const check = this.host.captureAuthority(envelope);
     switch (envelope.type) {
       case CONFIG_MESSAGE_TYPES.request: return this.onRequest(envelope, check);
@@ -956,16 +876,8 @@ export class ConfigReplicationService {
 
   private async applySnapshot(received: ConfigReplicaDocument, from: string, check: () => void): Promise<void> {
     if (!this.withinRevisionBound(received.revision, from)) return;
-    // A setting change that records no one who made it is not taken from another machine.
-    const { document: incoming, dropped } = withRecordedActsOnly(received);
-    // Only the sender's own changes say anything about the sender (it relays others' as it holds them).
-    const ownUnrecorded = [...received.entries, ...received.tombstones].filter((change) => !change.act && change.origin === from);
-    // A full document says everything the sender holds: what it no longer holds unrecorded is no longer said.
-    const stillUnrecorded = new Set(ownUnrecorded.map((change) => change.path));
-    this.noteRecorded(from, [...(this.unrecordedFrom.get(from)?.paths ?? [])].filter((path) => !stillUnrecorded.has(path)));
-    if (ownUnrecorded.length > 0) this.noteUnrecorded(from, ownUnrecorded);
-    else if (dropped > 0) this.host.logger.debug('cluster: changes relayed by another machine that record no one who made them were not taken', { from, dropped });
-    for (const change of [...received.entries, ...received.tombstones]) if (!change.act) this.refusedPaths.add(change.path);
+    // Every change is taken as it comes, with a record of who made it or none (every machine of the group is the same user).
+    const incoming = received;
     await this.applyDocument(mergeConfigReplica(this.document, this.publicDocument(incoming)), from, check);
     // A full document from a member: this copy now holds at least what it held.
     if (this.resyncUntil !== null && incoming.revision >= this.resyncUntil) this.resyncUntil = null;
@@ -1022,11 +934,8 @@ export class ConfigReplicationService {
     if (originated.entries.length !== incoming.entries.length || originated.tombstones.length !== incoming.tombstones.length) {
       this.host.logger.warn('cluster: ignored replicated changes the sender did not originate', { from: envelope.nodeId });
     }
-    // A setting change that records no one who made it is not taken from another machine.
-    const { document: own, dropped } = withRecordedActsOnly(originated);
-    if (dropped > 0) this.noteUnrecorded(envelope.nodeId, [...originated.entries, ...originated.tombstones].filter((change) => !change.act));
-    // A change taken with its record: whatever was said not taken for that path from this member is no longer so.
-    this.noteRecorded(envelope.nodeId, [...own.entries, ...own.tombstones].map((change) => change.path));
+    // Taken as it comes, with a record of who made it or none.
+    const own = originated;
     if (own.entries.length === 0 && own.tombstones.length === 0) return;
     if (!this.withinRevisionBound(Math.max(...own.entries.map((entry) => entry.revision), ...own.tombstones.map((entry) => entry.revision)), envelope.nodeId)) return;
     const gap = this.noteGap(before, own);
@@ -1067,15 +976,10 @@ export class ConfigReplicationService {
       const suppliedOrigin = envelope.body['origin'], existing = findReplicaEntry(this.document, path);
       if (suppliedOrigin !== undefined && (typeof suppliedOrigin !== 'string' || suppliedOrigin.length === 0 || suppliedOrigin.length > 256)) return;
       const origin = typeof suppliedOrigin === 'string' ? suppliedOrigin : existing?.secret && existing.revision === revision ? existing.origin : envelope.nodeId;
-      // A credential that records no one who made it is not taken from another machine.
+      // Taken with a record of who made it, or without (every machine of the group is the same user).
       const act = readReplicaAct(envelope.body['act']);
-      if (!act) {
-        if (origin === envelope.nodeId) this.noteUnrecorded(envelope.nodeId, [{ path, revision, origin }]);
-        return;
-      }
-      if (origin === envelope.nodeId) this.noteRecorded(envelope.nodeId, [path]);
       const incoming: ConfigReplicaDocument = { version: 1, groupId: this.document.groupId, revision, tombstones: [], entries: [{
-        path, revision, origin, at: this.host.now(), secret: true, value: { secretRevision: revision }, act,
+        path, revision, origin, at: this.host.now(), secret: true, value: { secretRevision: revision }, ...(act ? { act } : {}),
       }] };
       const admitted = (): ConfigReplicaDocument | null => {
         const merged = mergeConfigReplica(this.document, incoming), selected = findReplicaEntry(merged, path);
@@ -1124,52 +1028,6 @@ export class ConfigReplicationService {
   async retryPendingEffects(): Promise<void> {
     await this.applyPendingEffects();
     await this.releaseHeld();
-    await this.carryUnrecorded();
-  }
-
-  /**
-   * The upgrade from a release that did not record who made a change (3.5.0): once, when this copy holds the group's
-   * settings, every shared change THIS machine made that was already in its copy at its own upgrade (`carryThrough`,
-   * stamped when this release first read the copy from disk) and records no one is marked the owner's, "carried from
-   * before this record existed", and sent again under the same revision, so every member, and a machine that joins
-   * later, takes it with nothing changed by hand. Never a change made after the upgrade (a hand edit since then records
-   * no one and stays here), and never another machine's: each machine carries its own at its own upgrade, and a machine
-   * removed from the group carries nothing, so its unrecorded changes are never re-sent as the owner's by the others
-   * (gate-review-6 G14). A document this release made is born marked (`carried`).
-   */
-  private async carryUnrecorded(): Promise<void> {
-    if (this.document.carried === true || !this.inStep) return;
-    let check: () => void;
-    try { check = this.host.captureAuthority(); } catch { return; }
-    const through = this.document.carryThrough ?? -1;
-    const ours = (change: { readonly origin: string; readonly revision: number }): boolean => change.origin === this.host.nodeId && change.revision <= through;
-    // The record is added to the SAME change (its path, revision and origin unchanged): a copy that keeps who made it
-    // wins over one that does not (config-replica.ts `beats`), and a newer change another machine made meanwhile, even
-    // one this machine did not take, is never overwritten by an older value sent again at a new revision.
-    const carry = <T extends { readonly act?: ReplicaAct | undefined; readonly origin: string; readonly revision: number }>(change: T): T =>
-      change.act || !ours(change) ? change : { ...change, act: CARRIED_ACT };
-    const entries = this.document.entries.map(carry);
-    const tombstones = this.document.tombstones.map(carry);
-    const settings = entries.filter((entry, index) => entry !== this.document.entries[index] && !entry.secret);
-    const credentials = entries.filter((entry, index) => entry !== this.document.entries[index] && entry.secret);
-    const deletions = tombstones.filter((tombstone, index) => tombstone !== this.document.tombstones[index]);
-    this.commit({ ...this.document, entries, tombstones, carried: true }, check);
-    // Only this machine's own changes are carried: they go to every member as deltas.
-    if (settings.length > 0) await this.broadcastDelta(this.document, settings.map((entry) => entry.path), check);
-    if (deletions.length > 0) await this.send(check, CONFIG_MESSAGE_TYPES.delta, { deletes: deletions });
-    // A credential is sent again sealed under its own revision, with its value as stored here.
-    for (const entry of credentials) {
-      if (appliedRevision(this.document, entry.path) !== entry.revision) continue;
-      try {
-        const value = await this.effectiveSecret(entry.path, check);
-        if (value !== null) await this.sendSealed(entry, value, check);
-      } catch (error) {
-        check();
-        this.host.logger.warn('cluster: a credential made before who made changes was recorded could not be sent again', { path: entry.path, error: error instanceof Error ? error.message : String(error) });
-      }
-    }
-    const carried = settings.length + deletions.length + credentials.length;
-    if (carried > 0) this.host.logger.info('cluster: shared changes made before who made them was recorded are marked yours and sent again', { carried });
   }
 
   /**

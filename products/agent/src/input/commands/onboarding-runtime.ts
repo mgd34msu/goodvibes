@@ -112,13 +112,7 @@ export async function runAgentHostUnpair(ctx: CommandContext, command: string, o
  * Sign-in list (local-auth.add and the rest).
  */
 const DAEMON_TOPIC_TABS: Partial<Record<SetupTopicId, { readonly place: string; readonly list: string }>> = {
-  'local-only': { place: 'devices', list: 'addresses' },
-  'browser': { place: 'devices', list: 'addresses' },
-  'other-devices': { place: 'devices', list: 'addresses' },
-  'webhooks': { place: 'devices', list: 'addresses' },
   'cloudflare': { place: 'devices', list: 'cloudflare' },
-  // The account that signs in from other devices: `a` on Addresses and ports, the four network topics' own control.
-  'who-signs-in': { place: 'devices', list: 'addresses' },
   // A provider's key is stored on the Secrets tab (`n`), the secret store's one control.
   'store-key': { place: 'safety', list: 'secrets' },
   // What a paired phone may be asked to do, and speaking and listening: the daemon's settings for them.
@@ -156,11 +150,6 @@ const SETUP_OPTIONS: SetupCommandOptions<CommandContext> = {
       if (!ctx.openPlace) return 'Models and providers is not available here.';
       ctx.openPlace('models');
     },
-    // Safety and sandboxing is the Permissions and safety place (terminal-shell places/safety-place.ts), on its sandbox setting.
-    'safety': async (_values, ctx) => {
-      if (!ctx.openPlace) return 'Permissions and safety is not available here.';
-      ctx.openPlace('safety', { list: 'sandbox-setting' });
-    },
     // The daemon's own settings, changed through the daemon (its settings.set and local-auth capabilities) on the tab
     // that holds them, as the terminal app's forms change them through it.
     ...Object.fromEntries((Object.entries(DAEMON_TOPIC_TABS) as [SetupTopicId, { place: string; list: string }][])
@@ -193,6 +182,7 @@ export function setupPlace(ctx: CommandContext): SetupPlaceHooks {
   return setupPlaceHooks(SETUP_OPTIONS, ctx, {
     // The row is the person coming to choose: "Who decides" opens whatever is in force.
     openWhoDecides: () => ctx.openWhoDecides?.({ always: true }) ?? Promise.resolve(false),
+    openPlace: (place, list) => { if (!ctx.openPlace) return false; ctx.openPlace(place, { list }); return true; },
     onSettingsChange: (listener) => ctx.platform.configManager.onDidChangeIncarnation(listener),
   });
 }

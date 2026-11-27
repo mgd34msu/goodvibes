@@ -1154,7 +1154,7 @@ An untrusted folder does not load its hooks file or its project MCP servers. Res
 
 ### Code work
 
-Code and changes is the place for the project's files, in the menu (Ctrl+G then m) of both programs; in the terminal app typing `/changes` opens it too, and `/changes staged`, `/changes working` or `/changes head` opens the Changes view on that set. Its lists are this program's own: read when it opens, after each action, and again by themselves whenever the program takes a checkpoint (after every turn or agent run that changed files, and when one is made or restored by hand):
+Code and changes is the place for the project's files, in the menu (Ctrl+G then m) of both programs; in the terminal app typing `/changes` opens it too; `v` in the Changes view cycles the staged changes, the changes not staged yet and everything since the last commit. Its lists are this program's own: read when it opens, after each action, and again by themselves whenever the program takes a checkpoint (after every turn or agent run that changed files, and when one is made or restored by hand):
 
 | List | What it shows | Its controls |
 | --- | --- | --- |

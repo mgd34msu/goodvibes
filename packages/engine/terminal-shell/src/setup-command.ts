@@ -2,7 +2,8 @@
  * setup-command.ts, the setup topics of both terminal programs: each topic is
  * the session capability `setup.<topic>` (capabilities/builtin/system-program.ts),
  * which opens one form for that topic (the terminal app's former wizard pages,
- * the Agent's former Start rows) applying only its own fields. There is no slash
+ * the Agent's former Start rows) applying only its own fields; the six topics that only open a place
+ * (`SETUP_PLACE_TOPICS`) are rows of the list that open it, with no capability. There is no slash
  * command: every topic is a row of the System place's Setup tab (and the topics of
  * another group also a key in that group's place), found and run by id too.
  *
@@ -54,12 +55,38 @@ interface SetupTopicWords {
 
 /** Every topic's words, in list order: the capabilities' own (capabilities/builtin/system-program.ts `setup.<topic>`). */
 const { model: MODEL_TOPIC, 'sign-in': SIGN_IN_TOPIC, ...FORM_TOPICS_REST } = SETUP_TOPIC_WORDS;
+
+/**
+ * The topics that only open a place: a row of the Setup list that opens `place` on `list`, and nothing else (no
+ * capability of its own, as a typed command that opens a place carries `opens`). Both programs open the same control:
+ * Devices and network's Addresses and ports (`a` there makes the account that signs in from a browser or another
+ * device), and Permissions and safety at the sandbox switch.
+ */
+export type SetupPlaceTopicId = 'local-only' | 'browser' | 'other-devices' | 'webhooks' | 'who-signs-in' | 'safety';
+export interface SetupPlaceTopicWords extends SetupTopicWords {
+  readonly opens: { readonly place: string; readonly list: string };
+}
+export const SETUP_PLACE_TOPICS: Readonly<Record<SetupPlaceTopicId, SetupPlaceTopicWords>> = {
+  'local-only': { label: 'Only this computer', word: 'local-only', opens: { place: 'devices', list: 'addresses' }, sentence: 'Opens Addresses and ports in Devices and network, where the daemon, web UI and webhook listeners are turned off so everything stays on this computer.' },
+  'browser': { label: 'Use it in a browser', word: 'browser', opens: { place: 'devices', list: 'addresses' }, sentence: 'Opens Addresses and ports in Devices and network: the web UI switch, where it listens, and the account that signs in from a browser.' },
+  'other-devices': { label: 'Other devices', word: 'other-devices', opens: { place: 'devices', list: 'addresses' }, sentence: 'Opens Addresses and ports in Devices and network: the addresses and ports your other devices reach, and the account that signs in from them.' },
+  'webhooks': { label: 'Receive webhooks', word: 'webhooks', opens: { place: 'devices', list: 'addresses' }, sentence: 'Opens Addresses and ports in Devices and network: the switch for receiving webhooks and events from other tools, and where it listens.' },
+  'who-signs-in': { label: 'Who can sign in here', word: 'who-signs-in', opens: { place: 'devices', list: 'addresses' }, sentence: 'Opens Addresses and ports in Devices and network, where the account that signs in to this GoodVibes from a browser or another device is made.' },
+  'safety': { label: 'Safety', word: 'safety', opens: { place: 'safety', list: 'sandbox-setting' }, sentence: 'Opens Permissions and safety at the sandbox switch, beside the other safety settings.' },
+};
+
+/** Every topic's words: the capabilities' own, the place topics' and a provider of your own. */
 export const SETUP_TOPICS: Readonly<Record<SetupTopicId, SetupTopicWords>> = {
   'model': MODEL_TOPIC,
   'sign-in': SIGN_IN_TOPIC,
   'add-provider': { label: 'Add a provider of your own', word: 'add-provider', sentence: 'Opens the form for adding an OpenAI-compatible provider of your own.' },
   ...FORM_TOPICS_REST,
+  ...SETUP_PLACE_TOPICS,
 };
+
+function isPlaceTopic(id: string): id is SetupPlaceTopicId {
+  return Object.prototype.hasOwnProperty.call(SETUP_PLACE_TOPICS, id);
+}
 
 /** This program's setup topic runs as the capabilities `setup.<topic>` take them (system-session.ts `setupTopic`). */
 export function setupTopicOf<Ctx>(options: SetupCommandOptions<Ctx>, ctx: Ctx): (topic: string) => Promise<string | void> {
@@ -220,10 +247,12 @@ export interface SetupPlaceHooks {
 export function setupPlaceHooks<Ctx>(options: SetupCommandOptions<Ctx>, ctx: Ctx, program: {
   /** Open "Who decides" alone for the model in use; false when it is not needed. */
   readonly openWhoDecides: () => Promise<boolean>;
+  /** Open a place on one list, on top of what is open (the rows of `SETUP_PLACE_TOPICS`); absent where no place can be shown. */
+  readonly openPlace?: ((place: string, list: string) => boolean) | undefined;
   /** Told on every change of this program's settings; returns the stop. */
   readonly onSettingsChange?: ((listener: () => void) => () => void) | undefined;
 }): SetupPlaceHooks {
-  const served = (id: SetupTopicId | SetupExtraId): boolean => (id === 'pair' || id === 'unpair' ? options.pairsWithHost === true : options.runs[id] !== undefined);
+  const served = (id: SetupTopicId | SetupExtraId): boolean => (id === 'pair' || id === 'unpair' ? options.pairsWithHost === true : isPlaceTopic(id) || options.runs[id] !== undefined);
   const wordsOf = (id: SetupTopicId | SetupExtraId): SetupTopicWords => (id === 'pair' || id === 'unpair' ? EXTRA_WORDS[id] : SETUP_TOPICS[id]);
   // What this program opens for the topic: its own sentence where the two programs open different things.
   const sentenceOf = (id: SetupTopicId | SetupExtraId): string => wordsOf(id)[options.program] ?? wordsOf(id).sentence;
@@ -281,6 +310,11 @@ export function setupPlaceHooks<Ctx>(options: SetupCommandOptions<Ctx>, ctx: Ctx
       if (id === 'who-decides') {
         if (await program.openWhoDecides()) return undefined;
         return 'Nothing to decide here: GoodVibes asks you, or a decision model can answer.';
+      }
+      if (isPlaceTopic(id)) {
+        const { place, list } = SETUP_PLACE_TOPICS[id].opens;
+        if (!program.openPlace?.(place, list)) return `${SETUP_PLACE_TOPICS[id].label} cannot be shown here.`;
+        return undefined;
       }
       const outcome = await runTopic(rowCapability(id as SetupTopicId | SetupExtraId));
       if (!outcome.ok) throw new Error(outcome.reason);

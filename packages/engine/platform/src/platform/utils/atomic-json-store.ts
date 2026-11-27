@@ -29,7 +29,7 @@
  *      write created) after the rename, so the new name itself survives a
  *      power loss before success is returned.
  *
- *      The parent directory is created once per process and then trusted.
+ *      The parent directory is made when it is not there (one `stat` per write; a folder removed later is made again).
  *      A caller that passes `assertCurrent` or `onEffect` gets exactly one
  *      check of its guard and of the parent directory's identity, immediately
  *      before the rename; nothing else re-proves the path. Another process of

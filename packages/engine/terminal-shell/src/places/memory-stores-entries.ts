@@ -18,7 +18,7 @@
  * capabilities. This file holds no terminal code: the web UI draws these
  * lists too (places/browser.ts).
  */
-import type { PlaceAction, PlaceDetailLine, PlaceFollow, PlaceItem, PlaceList, PlaceRow } from './place-types.js';
+import type { PlaceAction, PlaceCapabilityAction, PlaceDetailLine, PlaceFollow, PlaceItem, PlaceList, PlaceProgramName, PlaceRow } from './place-types.js';
 
 type Review = 'fresh' | 'reviewed' | 'stale';
 
@@ -221,8 +221,15 @@ const notesList: PlaceList<MemoryStoreItem> = {
   },
 };
 
+/**
+ * Personas, Agent homes and starters are the Agent's: its voice, its separate homes and the templates they are made from.
+ * The terminal app has none of them, so only the Agent (and the web view of the daemon's stores) draws them.
+ */
+const AGENT_HAS: readonly PlaceProgramName[] = ['agent', 'web'];
+
 const personasList: PlaceList<MemoryStoreItem> = {
   id: 'personas',
+  programs: AGENT_HAS,
   label: 'Personas',
   noun: 'your personas',
   source: { kind: 'daemon', method: 'capabilities.run', input: run('personas.list'), items: personaItems },
@@ -371,6 +378,7 @@ const artifactsList: PlaceList<MemoryStoreItem> = {
 
 const agentHomesList: PlaceList<MemoryStoreItem> = {
   id: 'agent-homes',
+  programs: AGENT_HAS,
   label: 'Agent homes',
   noun: 'the Agent\'s separate homes',
   source: { kind: 'daemon', method: 'capabilities.run', input: run('agent-home.list'), items: homeItems },
@@ -395,6 +403,7 @@ const agentHomesList: PlaceList<MemoryStoreItem> = {
 
 const startersList: PlaceList<MemoryStoreItem> = {
   id: 'starters',
+  programs: AGENT_HAS,
   label: 'Starters',
   noun: 'the starter templates an Agent home is made from',
   source: { kind: 'daemon', method: 'capabilities.run', input: run('agent-home.starters'), items: starterItems },
@@ -430,7 +439,7 @@ const BOTH = ['in-use', 'not-in-use'] as const;
 const ALL: readonly Review[] = ['fresh', 'reviewed', 'stale'];
 
 /** Every action on those lists, by capability id. */
-export const MEMORY_STORE_ACTIONS: readonly PlaceAction<MemoryStoreItem>[] = [
+const EVERY_PROGRAM_ACTIONS: readonly PlaceCapabilityAction<MemoryStoreItem>[] = [
   // Notes
   { key: 'enter', id: 'note-change', list: 'notes', capability: 'notes.edit', label: 'change', fill: { note: 'id' } },
   { key: 'c', id: 'note-new', list: 'notes', whole: true, capability: 'notes.create', label: 'new note' },
@@ -523,6 +532,12 @@ export const MEMORY_STORE_ACTIONS: readonly PlaceAction<MemoryStoreItem>[] = [
   { key: 'l', id: 'starter-learned', list: 'starters', whole: true, capability: 'agent-home.starter-learned', label: 'make one from what the Agent learned' },
   { key: 'g', id: 'starter-guide', list: 'starters', whole: true, capability: 'agent-home.guide', label: 'how to write one' },
 ];
+
+/** The controls of the Agent's own lists (and "make a persona" on a note) are drawn only where the lists are. */
+const AGENT_LISTS: ReadonlySet<string> = new Set(['personas', 'agent-homes', 'starters']);
+export const MEMORY_STORE_ACTIONS: readonly PlaceAction<MemoryStoreItem>[] = EVERY_PROGRAM_ACTIONS.map((action) => (
+  AGENT_LISTS.has(action.list) || action.id === 'note-to-persona' ? { ...action, programs: AGENT_HAS } : action
+));
 
 /** What the terminal side of these lists reads (memory-stores-lists.ts: the live lists a form's inputs choose from). */
 export { DRAFT_WORDS, REVIEW_WORDS, RUNNING_WORDS, reviewOf };

@@ -27,8 +27,8 @@ import { createHash } from 'node:crypto';
  * Who made a replicated change on the machine it was made on, and how it was decided there (daemon-api setting-act.ts
  * `SettingAct`, the same shape): `press`, the owner's own press; `yes`, their yes to a call put to them (`by` is the caller
  * who asked); `rules`, admitted under their rules for the named caller. Recorded by the originating machine from its own
- * dispatch, carried inside the group's authenticated messages, kept and shown by every member. A setting change from a
- * peer that records none is not taken.
+ * dispatch, carried inside the group's authenticated messages, kept and shown by every member. The record is optional:
+ * every machine of the group is the same user, and a change that records none (3.5.0 wrote none) is taken like any other.
  */
 export interface ReplicaAct {
   readonly by: string;
@@ -76,8 +76,8 @@ export function readReplicaAct(value: unknown): ReplicaAct | undefined {
 }
 
 /**
- * A peer's document with only the changes that record who made them: a setting or credential change (or deletion) with
- * no recorded actor is not taken from another machine.
+ * A peer's document with only the changes that record who made them. No longer used: nothing is dropped for lacking the
+ * record (kept for a caller that wants the split).
  */
 export function withRecordedActsOnly(document: ConfigReplicaDocument): { readonly document: ConfigReplicaDocument; readonly dropped: number } {
   const entries = document.entries.filter((entry) => entry.act !== undefined);
@@ -473,10 +473,7 @@ export function findReplicaEntry(
  */
 export function replicaDigest(document: ConfigReplicaDocument): string {
   const hash = createHash('sha256');
-  // A setting change that records no one who made it is kept only where it was made (no other member takes it), so it
-  // is left out here: two copies that differ only by such a change hold the same group settings.
-  const recorded = withRecordedActsOnly(document).document;
-  document = recorded;
+  // Every change counts, with a record of who made it or without: none is left out (as in 3.5.0).
   for (const entry of document.entries) hash.update(`e\0${entry.path}\0${entry.revision}\0${entry.origin}\0${entry.secret ? 1 : 0}\n`);
   for (const entry of document.tombstones) hash.update(`t\0${entry.path}\0${entry.revision}\0${entry.origin}\0${entry.secret ? 1 : 0}\n`);
   return hash.digest('hex').slice(0, 32);

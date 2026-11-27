@@ -22,11 +22,6 @@ const FORM_TOPICS: readonly OnboardingWizardTopic[] = [
  * ports (each listener on or off, its address, port and encryption, changed through the daemon; `a` there makes the
  * account that signs in from a browser or another device). "Who can sign in here" is that account: the same control.
  */
-const NETWORK_TOPICS: readonly SetupTopicId[] = ['local-only', 'browser', 'other-devices', 'webhooks', 'who-signs-in'];
-const openAddresses: SetupRun<CommandContext> = async (_values, ctx) => {
-  if (!ctx.openPlace) return 'Devices and network cannot be shown here.';
-  ctx.openPlace('devices', { list: 'addresses' });
-};
 
 /**
  * The form opens on top of what is open (a place included); the run ends when it is submitted or left, and its
@@ -56,13 +51,7 @@ const SETUP_OPTIONS: SetupCommandOptions<CommandContext> = {
   program: 'tui',
   runs: {
     ...Object.fromEntries(FORM_TOPICS.map((topic) => [topic, openForm(topic)])) as Partial<Record<SetupTopicId, SetupRun<CommandContext>>>,
-    ...Object.fromEntries(NETWORK_TOPICS.map((topic) => [topic, openAddresses])),
     'history': async (_values, ctx) => { ctx.openSettingsModal?.('behavior.saveHistory'); },
-    // Safety and sandboxing is the Permissions and safety place (terminal-shell places/safety-place.ts), on its sandbox setting.
-    'safety': async (_values, ctx) => {
-      if (!ctx.openPlace) return 'Permissions and safety cannot be shown here.';
-      ctx.openPlace('safety', { list: 'sandbox-setting' });
-    },
     'first-run': async (_values, ctx) => {
       if (!ctx.openFirstRun) return 'First run is not available here.';
       ctx.openFirstRun();
@@ -88,6 +77,7 @@ export function setupPlace(ctx: CommandContext): SetupPlaceHooks {
   return setupPlaceHooks(SETUP_OPTIONS, ctx, {
     // The row is the person coming to choose: "Who decides" opens whatever is in force.
     openWhoDecides: () => ctx.openWhoDecides?.({ always: true }) ?? Promise.resolve(false),
+    openPlace: (place, list) => { if (!ctx.openPlace) return false; ctx.openPlace(place, { list }); return true; },
     onSettingsChange: (listener) => ctx.platform.configManager.onDidChangeIncarnation(listener),
   });
 }

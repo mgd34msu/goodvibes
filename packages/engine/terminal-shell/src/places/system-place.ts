@@ -524,6 +524,8 @@ export const SYSTEM_PLACE = definePlace<Item>({
     { kind: 'program', key: 'enter', id: 'open', list: 'setup', label: 'open', run: 'setup.open' },
     { kind: 'program', key: 's', id: 'skip', list: 'setup', states: ['not-done'], label: 'skip for now', run: 'setup.skip' },
     { kind: 'program', key: 's', id: 'bring-back', list: 'setup', states: ['skipped'], label: 'bring it back', run: 'setup.bring-back' },
+    // The Agent takes the settings the terminal app has set (its "Import settings" row runs the same capability): the terminal app has nothing to take them from.
+    { key: 'i', id: 'copy-terminal-app-settings', list: 'setup', whole: true, capability: 'settings.copy-from-terminal-app', label: 'copy the terminal app\'s settings', programs: ['agent'] },
     { key: 'k', id: 'keep-awake', list: 'sleep', states: ['off'], capability: 'power.on', label: 'keep awake' },
     { key: 'k', id: 'let-sleep', list: 'sleep', states: ['held', 'held-partial', 'refused'], capability: 'power.off', label: 'let it sleep' },
     { key: 'c', id: 'check-now', list: 'updates', states: ['on', 'off', 'failing', 'pending'], capability: 'update.daemon', label: 'check now', fill: { now: () => 'yes' } },
@@ -536,8 +538,8 @@ export const SYSTEM_PLACE = definePlace<Item>({
     { key: 'o', id: 'read-update-state', list: 'updates', states: ['current', 'newer', 'unknown', 'current-kept', 'newer-kept', 'unknown-kept'], capability: 'update.read-review', label: 'read a saved one' },
     { key: 'i', id: 'install', list: 'voice', states: ['not-provisioned', 'partial'], capability: 'voice.setup', label: 'install' },
     // Workspaces (capabilities/builtin/workspaces.ts): the Agent registers the folder it starts in; here one is undone.
-    { key: 'x', id: 'unregister-workspace', list: 'workspaces', states: ['registered'], capability: 'workspaces.unregister', label: 'unregister', fill: { root: 'id' } },
-    { key: 'a', id: 'register-workspace', list: 'workspaces', whole: true, capability: 'workspaces.register', label: 'register a folder' },
+    { key: 'x', id: 'unregister-workspace', list: 'workspaces', states: ['registered'], capability: 'workspaces.unregister', label: 'unregister', fill: { root: 'id' }, programs: ['agent', 'web'] },
+    { key: 'a', id: 'register-workspace', list: 'workspaces', whole: true, capability: 'workspaces.register', label: 'register a folder', programs: ['agent', 'web'] },
     // Where a chat that has no project is given its own (capabilities/builtin/chats.ts, `storage.automaticProjectsFolder`).
     { key: 'f', id: 'automatic-folder', list: 'workspaces', whole: true, capability: 'chats.automatic-folder', label: 'folder for automatic projects', form: true },
     { key: 'x', id: 'remove-file', list: 'sign-in', states: ['present'], capability: 'local-auth.remove-first-run-file', label: 'remove it' },

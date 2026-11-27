@@ -649,6 +649,8 @@ const HANDED_OFF_ROW_WORDS: Readonly<Record<string, string>> = {
 
 const handedOffList: PlaceList<WorkAgentItem> = {
   id: 'handed-off',
+  // Work is handed to the terminal app from the Agent: the terminal app is where it lands, not where it is handed.
+  programs: ['agent', 'web'],
   label: 'Handed off',
   noun: 'the work you handed off',
   source: { kind: 'daemon', method: 'capabilities.run', input: { id: 'agents.handed-off' }, items: handedOffItems },
@@ -734,9 +736,9 @@ export const WORK_AGENT_ACTIONS: readonly PlaceAction<WorkAgentItem>[] = [
   { key: 's', id: 'start-research', list: 'research', whole: true, capability: 'research.start-run', label: 'start a research run' },
   { key: 'w', id: 'save-report', list: 'research', capability: 'research.save-report', label: 'save a sourced report', fill: { question: (item) => (item as ResearchRunItem).question, title: (item) => (item as ResearchRunItem).title } },
   { key: 'a', id: 'add-source', list: 'sources', whole: true, capability: 'research.add-source', label: 'add a source' },
-  // Coding work handed to the terminal app, as a shared session it takes up: from every program, the terminal app too.
-  { key: 'h', id: 'hand-off', list: 'handed-off', whole: true, capability: 'agents.hand-off', label: 'hand coding work on' },
-  { key: 'enter', id: 'handed-off-detail', list: 'handed-off', capability: 'agents.handed-off', label: 'where it stands', fill: { session: 'id' } },
+  // Coding work handed to the terminal app, as a shared session it takes up: from the Agent, and the web view of the daemon.
+  { key: 'h', id: 'hand-off', list: 'handed-off', whole: true, capability: 'agents.hand-off', label: 'hand coding work on', programs: ['agent', 'web'] },
+  { key: 'enter', id: 'handed-off-detail', list: 'handed-off', capability: 'agents.handed-off', label: 'where it stands', fill: { session: 'id' }, programs: ['agent', 'web'] },
   // Task suites run in the terminal app's project.
   { key: 'l', id: 'suite-tasks', list: 'evaluations', whole: true, capability: 'eval.list', label: 'tasks in a suite' },
   { key: 's', id: 'run-suite', list: 'evaluations', whole: true, capability: 'eval.run', label: 'run a suite' },

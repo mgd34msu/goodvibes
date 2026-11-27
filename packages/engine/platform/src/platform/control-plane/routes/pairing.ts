@@ -80,11 +80,9 @@ function readAttemptId(params: Record<string, unknown>): string | undefined {
 }
 
 /**
- * What a credential the owner makes holds when the owner names no scopes: what a device or an agent working in the projects
- * the owner gives it needs (its sessions and their transcripts, capabilities run in its projects, checkpoints and worktrees
- * there, reads of memory, knowledge, skills and events, work it asks for, starts and stops there, its own questions raised), and no administrative
- * scope: a credential with a stored list is a paired device (daemon-api actor.ts), never an admin. Full operator
- * authority, or any administrative scope, only when the owner in person names it when making the credential.
+ * A scope list for a device that works in the projects it is given and holds no administrative scope. No longer the default
+ * of a new credential (naming no list gives full operator authority, as released, see `mintedPairingScopes`); kept as a
+ * list a caller may name.
  */
 export const DEFAULT_PAIRED_SCOPES: readonly string[] = Object.freeze([
   'read:sessions', 'write:sessions', 'read:own-sessions', 'read:transcripts', 'read:control-plane', 'write:control-plane',
@@ -105,19 +103,18 @@ export const DEFAULT_PAIRED_SCOPES: readonly string[] = Object.freeze([
  * The scope list a new pairing token stores. A caller grants only what it
  * holds: a narrowed caller (not admin) mints a token bounded by its own
  * scopes, inheriting them when it names none, and is refused a scope it does
- * not hold. An admin caller's token holds the list it names; naming none, it holds
- * {@link DEFAULT_PAIRED_SCOPES}; `["*"]` (full operator authority) only from the
- * owner in person, their choice when making it.
+ * not hold. An admin caller's token holds the list it names, or full operator
+ * authority when it names none (as released; `["*"]` says the same).
  */
 export function mintedPairingScopes(context: GatewayMethodInvocation['context'], requested: unknown): readonly string[] | undefined {
   let named: string[] | undefined;
   if (requested !== undefined) {
     const full = Array.isArray(requested) && requested.length === 1 && requested[0] === '*';
     if (full) {
-      // The owner in person, or the owner's own command line (`do`, its act decided under the mode before it reaches here).
-      const by = { actor: context.actor, credentialKind: context.credentialKind ?? undefined, registration: context.call?.registration };
-      if (!makesOwnerOnlyAct(by)) {
-        throw new GatewayVerbError('Full operator authority for a new credential is given only by the owner in person, when making it; name the scopes it needs instead. Nothing was made.', 'OWNER_ONLY_ACT', 403, 'scopes');
+      // `["*"]` is full operator authority, the same as naming no list: from a caller that holds it (every credential of
+      // the user that is not narrowed); a narrowed caller grants only what it holds.
+      if (context.admin === false && context.scopes !== undefined && !context.scopes.includes('*')) {
+        throw new GatewayVerbError('A paired device cannot be given scopes this credential does not hold: *. Name only scopes you hold.', 'MISSING_SCOPE', 403, 'scopes');
       }
       return undefined;
     }
@@ -126,7 +123,8 @@ export function mintedPairingScopes(context: GatewayMethodInvocation['context'],
     }
     named = [...new Set((requested as string[]).map((scope) => scope.trim()))];
   }
-  if (context.admin !== false || context.scopes === undefined) return named ?? DEFAULT_PAIRED_SCOPES;
+  // An admin caller that names no list mints full operator authority, as released (`undefined`: no stored list).
+  if (context.admin !== false || context.scopes === undefined) return named;
   const held = new Set(context.scopes);
   if (named === undefined) return [...held];
   const missing = named.filter((scope) => !held.has(scope));
@@ -250,16 +248,12 @@ function createRevokeHandler(service: PairingGatewayService, onRevoked?: Pairing
     // Told by the kind of credential: a sign-in user named like a device's principal is never that device.
     const callerTokenId = pairingTokenIdOfCaller(invocation.context);
     if (callerTokenId !== undefined && (token.id === callerTokenId || token.mintedBy === callerTokenId)) return revoke();
-    // Any other token is access the owner granted: withdrawing it is decided by the one owner rule
-    // (daemon/method-owner-decision.ts). The dispatch tells this handler whether it admits the caller at once; one it
-    // does not (a script with the operator token, an admin who is not the owner) is answered OWNER_DECISION_NEEDED,
-    // nothing revoked, and the dispatch puts the same call to the owner's gate. One the effect table refuses is refused.
+    // Any other token is access the user granted: withdrawing it runs at once for every credential of the user (the effect
+    // table's `access.withdraw`, which a sign-in under any name, a full device and the operator token all hold); one a
+    // narrow device's list does not reach is refused, as released. Nothing is put to anyone.
     void ownerApprovals;
-    if (invocation.context.metadata?.['ownerAdmitted'] === true) return revoke();
-    if (admitEffects(invocation.context.actor ?? systemActor('in-process'), ['access.withdraw']).kind === 'refused') {
-      throw new GatewayVerbError(`Revoking ${token.name} (${id}) withdraws access only the owner withdraws; this credential neither holds nor minted it. Nothing was revoked.`, 'OWNER_ONLY', 403, 'id');
-    }
-    throw new GatewayVerbError(`Revoking ${token.name} (${id}) ends that device's access, and the access of every device it paired: the owner decides it.`, 'OWNER_DECISION_NEEDED', 409, 'id');
+    if (admitEffects(invocation.context.actor ?? systemActor('in-process'), ['access.withdraw']).kind === 'allowed') return revoke();
+    throw new GatewayVerbError(`Revoking ${token.name} (${id}) withdraws access this credential neither holds nor minted. Nothing was revoked.`, 'OWNER_ONLY', 403, 'id');
   };
 }
 

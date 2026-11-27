@@ -59,7 +59,6 @@ import { conversationExposedNow, exposureNow } from '../../security/conversation
 import { withArtifactMaker } from '../../artifacts/turn-maker.js';
 import { methodCallRisk, OWNER_ONLY_WHERE, ownerOnlyCapabilityCall, ownerOnlyMethodArea, riskOfDescriptor, type MethodRisk, type OwnerOnlyArea } from '../method-risk.js';
 import { OUTSIDE_AGENT_ISSUE_METHOD_ID, outsideAgentQuestion } from '../method-catalog-programs.js';
-import { sharedKindGivenForCapability } from '../shared-kinds.js';
 import { answersTheOwner, isTheUser, makesOwnerOnlyAct, MODEL_NEVER, modelNeverWords, OWNER_ANSWERS_ONLY, OWNER_ANSWERS_ONLY_WORDS, OWNER_ONLY_ACT, ownerAnswers,
   ownerOnlyActWords, ownersCommandLine, ownersAgentProgram, ownersOwnPress, ownersProgramCaller } from '../../daemon/method-owner-decision.js';
 import { isCommandLineRegistration } from '../../daemon/program-registrations.js';
@@ -726,12 +725,8 @@ function createRunHandler(deps: CapabilityRouteDeps, methods: Pick<GatewayMethod
       }
       const asModel = ownerDecided ? effects.filter((effect) => !hisOwn(effect)) : effects;
       const asOwner = ownerDecided ? effects.filter(hisOwn) : [];
-      // A capability of one of the owner's shared kinds is opened by the owner's gift of that kind, not by a class or a scope
-      // (shared-kinds.ts `sharedKindGivenForCapability`; the method's own gate: daemon/http/gateway-binding-gate.ts
-      // `admittedAs`): a caller given it is admitted as an admin is. The owner's own acts were refused above.
-      const gifted = actor.agentFor === undefined && (actor.class === 'device' || actor.class === 'member' || actor.class === 'admin')
-        && sharedKindGivenForCapability(entry.id, actor.id);
-      const modelAdmission = admitEffects(gifted ? { ...actor, class: 'admin', scopes: 'all', ownerDevice: undefined } : actor, asModel);
+      // The class and the scopes of the credential alone admit it, as released: no gift of one of the user's shared kinds.
+      const modelAdmission = admitEffects(actor, asModel);
       const admission = modelAdmission.kind !== 'allowed' || asOwner.length === 0 ? modelAdmission : admitEffects(actor.agentFor!, asOwner);
       if (admission.kind === 'refused') throw new GatewayVerbError(`${entry.id}: ${admission.reason}. ${admission.next}`, admission.code, 403);
       if (admission.kind === 'ask-owner') throw new GatewayVerbError(`${entry.id} is the owner's to decide (${admission.reason}).`, 'OWNER_ONLY', 403);

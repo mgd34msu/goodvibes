@@ -29,8 +29,7 @@ import type { CallContext, GatewayMethodInvocationContext } from '../control-pla
 import { CALLER_RULES_ABSENT, callerPathRefusal, pathNamerOf } from '../control-plane/caller-paths.js';
 import { hasArtifactMaker, withArtifactMaker, type ArtifactTurnMaker } from '../artifacts/turn-maker.js';
 import { callerReachRefusal, reachableAnswer, reachFilterOf } from '../control-plane/caller-reach.js';
-import { SHARED_KIND_NOT_GIVEN, sharedKindGiven, type SharedKind, type SharedKindCaller } from '../control-plane/shared-kinds.js';
-import { catalogPathname } from './http/route-manifest.js';
+import { SHARED_KIND_NOT_GIVEN, type SharedKind, type SharedKindCaller } from '../control-plane/shared-kinds.js';
 import { callReachesKnowledge } from '../knowledge/knowledge-reach.js';
 import { daemonSharedKindRule, sharedKindAdmission, type SharedKindAnswer } from './shared-kind-gifts.js';
 import { withRecordReach } from '@goodvibes/engine/daemon-api';
@@ -61,7 +60,7 @@ import { decidedMarkAct, decidedMarkCovers, ownerApprovalCovers, spendCapability
 const SETTING_WRITE_METHOD_IDS: ReadonlySet<string> = new Set(['config.set', 'config.setMany', 'config.reset', 'credentials.set', 'credentials.delete']);
 import { methodCallRisk, OWNER_ONLY_WHERE, ownerOnlyMethodArea, riskOfDescriptor, VALUE_DECIDED_METHOD_IDS, type MethodRisk } from '../control-plane/method-risk.js';
 import { modelNeverMakes } from '../security/effect-authority.js';
-import { AGENT_CREDENTIAL_OWNER_ONLY_WORDS, ANSWER_METHOD_IDS, callerAdmitted, methodCallPutToOwner, mintsAgentCredential, nestedAnswerAdmitted, OWNER_ANSWERS_ONLY, OWNER_ANSWERS_ONLY_WORDS, OWNER_DECISION_NEEDED, OWNER_DEVICE_ANSWER_METHOD_IDS, ownerAnswers, ownerHimself, ownersAgentProgram, ownersDevice, ownersOwnSession, ownersProgramCaller, partyOfCaller, wellFormedActor,
+import { AGENT_CREDENTIAL_OWNER_ONLY_WORDS, ANSWER_METHOD_IDS, callerAdmitted, methodCallPutToOwner, mintsAgentCredential, nestedAnswerAdmitted, OWNER_ANSWERS_ONLY, OWNER_ANSWERS_ONLY_WORDS, OWNER_DECISION_NEEDED, OWNER_DEVICE_ANSWER_METHOD_IDS, ownerAnswers, ownerHimself, ownersAgentProgram, ownersDevice, ownersOwnSession, partyOfCaller, wellFormedActor,
   makesOwnerOnlyAct, MODEL_NEVER, modelNeverWords, OWNER_ONLY_ACT, ownerOnlyActWords, ownersCommandLine } from './method-owner-decision.js';
 import { asCallOutsideTurn, turnInputParty } from '../security/turn-input-party.js';
 import { decideInProject } from '../permissions/call-project.js';
@@ -612,11 +611,8 @@ export class DaemonControlPlaneHelper {
       this.recordRefusedCredential(req);
       return authenticationRequiredResponse();
     }
-    // A route of one of the owner's shared kinds is opened by the owner's gift of that kind (control-plane/shared-kinds.ts
-    // `sharedKindGiven`, the same gate the method's access check applies: http/gateway-binding-gate.ts `admittedAs`).
-    const served = principal.actor.agentFor === undefined
-      ? this.context.gatewayMethods.findByHttpBinding(req.method, catalogPathname(new URL(req.url).pathname)) : undefined;
-    if (!principal.admin && !(served !== undefined && sharedKindGiven(served.id, principal.principalId))) {
+    // The admin role of the credential alone, as released: no gift of one of the user's shared kinds opens a route.
+    if (!principal.admin) {
       return jsonErrorResponse({ error: 'Admin role required', code: 'ADMIN_REQUIRED',
         state: 'this credential is not an admin', next: ['Sign in with an admin account or use the operator token'] }, { status: 403 });
     }
@@ -871,20 +867,13 @@ export class DaemonControlPlaneHelper {
    * Cached transport scopes are a ceiling; a later catalog cannot widen them.
    *
    * `credentialKind` is what the transport established for this request, and
-   * `ownersProgram` who the caller is (method-owner-decision.ts
-   * `ownersProgramCaller`: their registered terminal program, their Agent program, a
-   * device they paired in person, a turn the daemon hosts; or a call the owner
-   * approved). Authority comes from who, never from the credential's kind: the
-   * `local` credential (the operator token from this machine) gets the owner's
-   * own machine's authority only from their own program, while that token is still
-   * the operator token; it is looked up on first use, so a call that never
-   * reaches native work pays nothing for it. The owner in person on their sign-in
-   * (`ownerSession`: the one owner definition, method-owner-decision.ts
-   * `ownersOwnSession`) holds the same authority as their own machine, the owner's
-   * one native identity, while that session is still current and still theirs. A
-   * pairing token is native as itself only for the owner's own device or their Agent
-   * program; a script, an admin's or a member's pairing, and the Agent's
-   * credential alone hold none.
+   * authority goes by it, as released: the `local` credential (the operator token
+   * from this machine) gets this machine's own authority while that token is
+   * still the operator token; it is looked up on first use, so a call that never
+   * reaches native work pays nothing for it. A signed-in user (`ownerSession`,
+   * method-owner-decision.ts `ownersOwnSession`) holds the same authority as
+   * this machine, the user's one native identity, while that session is still
+   * current. Any pairing token is native as itself while it is still current.
    * While the native identity holds and the catalog's scopes do not move,
    * `current()` answers the snapshot it already built: one `lstat` per call.
    */
@@ -2018,19 +2007,12 @@ export class DaemonControlPlaneHelper {
           // A plain field, not built on first read: handlers refuse invocation
           // fields that are accessors. For anything but a paired device's token
           // or the local credential it is a prefix test and null.
-          // Native authority by who the caller is (method-owner-decision.ts `ownersProgramCaller`), or the owner's yes.
           nativeExecutionAuthority: this.createNativeExecutionAuthority(input.authToken, context?.scopes ?? [], authenticated?.credentialKind,
             ownersOwnSession({ actor: authenticated?.actor, credentialKind: authenticated?.credentialKind ?? undefined }),
-            // The owner's own daemon turn acting with their administrative authority (capability-wiring.ts `ownersAdmin`:
-            // their clean turn, or the one call they said yes to in an exposed one) does their native work as their program does.
-            ownerApproved || (input.daemonTurn === true && context?.admin === true)
-            || ownersProgramCaller({ actor: authenticated?.actor, credentialKind: authenticated?.credentialKind ?? undefined,
-              registration: input.context?.call?.registration, daemonHosted: input.context?.call?.daemonHosted === true })
-              // The owner's own device does their native work (their turns under their mode); it is not the owner for anything else.
-              || ownersDevice({ actor: authenticated?.actor, credentialKind: authenticated?.credentialKind ?? undefined })
-              // Any paired device that is still current submits and runs work as itself (its own pairing's identity, never
-              // the owner's machine's): its request, each step of the work then decided under the owner's mode as any call is.
-              || (authenticated?.credentialKind === 'device-token' && descriptor.id.startsWith('workLedger.'))) ?? undefined,
+            // Native authority goes by the kind of credential, as released (the `local` credential: this machine's own; a
+            // pairing token: its own, while still current; a sign-in: this machine's, as the user's own). It is not asked
+            // who the caller is: every credential of the user holds what its kind holds.
+            true) ?? undefined,
           isAuthorized: this.retainGatewayAuthorization(input.authToken, descriptor, context, ownerApproved),
           context: {
             authToken: input.authToken,

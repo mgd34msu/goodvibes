@@ -92,15 +92,16 @@ const ROWS = [
   { id: 'settings.write', least: 'admin', scope: 'write:config', subject: 'any' },
   /**
    * Withdrawing access the caller neither minted nor holds (a device the owner
-   * paired, another principal's token, the shared operator token): the owner's
-   * own act, refused for anyone else (an admin who is not the owner, a device, a
-   * script), never put to the owner. A token the caller minted or holds is revoked
+   * paired, another principal's token, the shared operator token): made at once by
+   * every credential of the user (all of the owner's class: a sign-in under any
+   * name, a full pairing, the operator token); refused for a device holding a
+   * narrow scope list, as released. A token the caller minted or holds is revoked
    * under control-plane.write alone (routes/pairing.ts).
    */
   { id: 'access.withdraw', least: 'owner', scope: 'write:control-plane', subject: 'any', modelRefused: true },
   /**
-   * A settings change that loosens a security, permission, judgment or payment setting: the owner's own act, refused
-   * for anyone else, never put to the owner (who of the owner's class is the owner in person: daemon/method-owner-decision.ts).
+   * A settings change that loosens a security, permission, judgment or payment setting: made by every credential of the
+   * user (of the owner's class, daemon/method-owner-decision.ts); refused for a device holding a narrow scope list, as released.
    */
   { id: 'settings.loosen', least: 'owner', scope: 'write:config', subject: 'any' },
   /** Writing a credential: a model's call makes it only in the owner's own turn, under their mode (`MODEL_UNDER_MODE`). */

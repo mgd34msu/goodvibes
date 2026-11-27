@@ -108,12 +108,12 @@ function availableOffers(deps: PairingHandoffDeps): Set<PairingHandoffOfferKind>
 
 /**
  * The actor a freshly minted pairing token will be (daemon-api actor.ts): a
- * full pairing is an admin (the owner's own device too: a device is never the
- * owner in person), a narrowed one a device holding its list.
+ * full pairing is of the owner's class (the user's device), a narrowed one a
+ * device holding its list.
  */
 function mintedActor(scopes: readonly string[] | undefined): Actor {
   return {
-    class: scopes !== undefined ? 'device' : 'admin',
+    class: scopes !== undefined ? 'device' : 'owner',
     id: 'pairing:minted',
     scopes: scopes !== undefined ? new Set(scopes) : 'all',
     via: 'http',
@@ -164,14 +164,11 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     }
     const available = availableOffers(deps);
     const scopes = mintedPairingScopes(invocation.context, undefined);
-    // The owner's pairing flow: a device is the owner's only when the owner in person starts the pairing (their verified program
-    // or their signed-in session, method-owner-decision.ts `ownerHimself`) with full authority, and the code this call
-    // returns to their own screen is what the device uses. From anyone else (an admin who is not the owner, a script, a
-    // device, the owner's own device included, the Agent's credential, a narrowed caller, a call made on the owner's yes to someone
-    // else's request) it is automation. Recorded at the mint with its maker and never changed afterwards.
+    // The pairing flow makes a full pairing again, as released: a device the user pairs from any credential of theirs (a
+    // sign-in under any name, a device, the operator token, a typed `do`) holds full authority, and the code this call returns
+    // is what the device uses. A narrowed caller's pairing keeps its list. Recorded at the mint with its maker and never
+    // changed afterwards (method-owner-decision.ts `makesOwnerOnlyAct`).
     const context = invocation.context;
-    // The owner in person or the owner's own command line (`goodvibes pair`, a typed `do`): method-owner-decision.ts
-    // `makesOwnerOnlyAct`, the one test of who makes an act only the owner makes.
     const ownerPairing = scopes === undefined
       && makesOwnerOnlyAct({ actor: context.actor, credentialKind: context.credentialKind ?? undefined, registration: context.call?.registration });
     // Offered only what the paired device can complete: the completion's own effects, judged

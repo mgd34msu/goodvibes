@@ -1,36 +1,25 @@
 /**
- * outside-agent.ts, the one credential this daemon gives an outside agent (`goodvibes-daemon mcp serve`) and the
- * projects it may work in.
+ * outside-agent.ts, the one credential this daemon gives an outside agent (`goodvibes-daemon mcp serve`).
  *
  * The credential (`pairing.outsideAgent.issue`, asked for with the operator token) is a paired-device token named
- * "Outside agent (goodvibes-daemon mcp serve)", origin automation, issued once per daemon whatever address the server
- * reaches it by: its id is kept in `<daemon home>/outside-agent.json`, and a second ask while that pairing is still
- * listed is refused (revoked among the paired devices, a new one is issued). On a fresh install it is minted with no
- * project and no person's claim, and with the narrow scopes of a device that works in the projects it is given
- * (routes/pairing.ts `DEFAULT_PAIRED_SCOPES`): no administrative scope, so it is a paired device, never an admin. On a
- * home 3.5.0 ran in, where `mcp serve` spoke with the operator token, it is minted with what that token was carried at
- * the upgrade (see `issueOutsideAgent`): the upgrade takes nothing from it but the owner-only acts.
- *
- * Who works where is given by the owner in person (method-risk.ts `owner-act`): a call of it naming a folder it was not
- * given is refused, in every mode, with the sentence saying where the owner gives one; naming a folder never registers it or
- * gives it. A credential issued by 3.5.0 keeps the projects it was given and the scopes it holds, and the owner-only
- * acts are refused to it whatever its scopes (control-plane.ts, routes/capabilities.ts).
+ * "Outside agent (goodvibes-daemon mcp serve)", issued once per daemon whatever address the server reaches it by: its id
+ * is kept in `<daemon home>/outside-agent.json`, and a second ask while that pairing is still listed is refused (revoked
+ * among the paired devices, a new one is issued). It holds full operator authority with no stored list, as the operator
+ * token it replaces for `mcp serve` does, so it is the user's own credential: it names any project and nothing is asked
+ * or refused for that.
  */
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CallerProjectsStore } from '../workspace/caller-projects-store.js';
 import { CallerSharedStore } from '../control-plane/shared-kinds.js';
 import type { PairingMaker } from '../pairing/pairing-token-store.js';
-import { checkCallerProject, whyNeverAProject } from '../workspace/caller-project.js';
+import { checkCallerProject } from '../workspace/caller-project.js';
 import { resolveGoodVibesDaemonHome } from '../config/goodvibes-home.js';
 import { logger } from '../utils/logger.js';
 import { decideGrant, type GrantRequest } from './capability-owner-gate.js';
-import { DEFAULT_PAIRED_SCOPES } from '../control-plane/routes/pairing.js';
 
 /** The name the outside agent's credential is listed under among the paired devices. */
 export const OUTSIDE_AGENT_NAME = 'Outside agent (goodvibes-daemon mcp serve)';
-/** Who the question names. */
-const OUTSIDE_AGENT_WORDS = 'the outside agent "goodvibes-daemon mcp serve"';
 
 function keptFile(daemonHome: string): string {
   return join(daemonHome, 'outside-agent.json');
@@ -68,7 +57,8 @@ export function issueOutsideAgent(daemonHome: string, pairing: OutsideAgentPairi
   // default scopes, given nothing.
   const shared = new CallerSharedStore(daemonHome);
   const replacesOperatorToken = shared.operatorTokenCarried();
-  const minted = pairing.mintForMigration({ name: OUTSIDE_AGENT_NAME, ...(replacesOperatorToken ? {} : { scopes: DEFAULT_PAIRED_SCOPES }), ...(madeBy !== undefined ? { madeBy } : {}) });
+  // Full operator authority with no stored list, as the operator token holds and as 3.5.0 issued every pairing.
+  const minted = pairing.mintForMigration({ name: OUTSIDE_AGENT_NAME, ...(madeBy !== undefined ? { madeBy } : {}) });
   if (replacesOperatorToken) {
     const principalId = `pairing:${minted.id}`;
     shared.giveCarried(principalId, shared.carriedOf('local'));
@@ -105,31 +95,14 @@ export async function giveOutsideAgentProject(deps: {
 export type OutsideAgentProjectAnswer = { readonly ok: true } | { readonly ok: false; readonly reason: string };
 
 /**
- * The projects an outside agent's call names (see the header): one the owner gave it goes on; any other is refused, in
- * every mode, nothing asked, nothing registered or given: who works where is the owner's own act. `undefined` from the
- * returned function: the caller is not the outside agent.
+ * The projects an outside agent's call names: any (it is the user's own credential, full authority; the one project rule
+ * for what can never be a project still applies where the call's folder is checked). Nothing is asked and nothing is
+ * refused here: the returned function answers `undefined` (not the outside agent's business) for every call.
  */
-export function createOutsideAgentProjects(deps: {
+export function createOutsideAgentProjects(_deps: {
   readonly homeDirectory: string;
 }): (principalId: string, folders: readonly string[], signal?: AbortSignal) => Promise<OutsideAgentProjectAnswer | undefined> {
-  const daemonHome = resolveGoodVibesDaemonHome(deps.homeDirectory);
-  const store = new CallerProjectsStore(daemonHome);
-  const facts = { homeDirectory: deps.homeDirectory, goodVibesHome: join(deps.homeDirectory, '.goodvibes'), daemonHome };
-  const giveRule = 'only the owner in person gives it a project, in Devices and network, on its row ("Let a device or member work in a project")';
-
-  return async (principalId, folders) => {
-    const id = outsideAgentId(daemonHome);
-    if (id === undefined || principalId !== `pairing:${id}`) return undefined;
-    for (const folder of folders) {
-      const given = checkCallerProject(folder, { ownersProgram: false, principalId }, { ...facts, assignedProjects: (who) => store.projectsOf(who) });
-      if (given.ok) continue;
-      const never = whyNeverAProject(folder, facts);
-      return { ok: false, reason: never !== undefined
-        ? `${folder} cannot be a project (${never}): ${OUTSIDE_AGENT_WORDS} acts on shared things only here; ${giveRule}`
-        : `${OUTSIDE_AGENT_WORDS} was not given ${folder}, and naming a folder gives nothing: ${giveRule}` };
-    }
-    return { ok: true };
-  };
+  return async () => undefined;
 }
 
 /**

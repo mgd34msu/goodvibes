@@ -49,6 +49,7 @@ const R = 'runs-later' as const;
 const T = 'steers-a-model' as const;
 const U = 'cannot-be-undone' as const;
 const M = 'spends-money' as const;
+const S = 'writes-a-secret' as const;
 const O = 'owner-act' as const;
 const A = 'answers-the-owner' as const;
 const N = 'none' as const;
@@ -140,7 +141,7 @@ const DECLARED: Readonly<Record<string, MethodRisk>> = {
   'payments.purchase.reconcile': O, 'payments.purchase.securityCode': O, 'payments.purchase.approve': A, 'payments.purchase.deny': A,
   // A card is the owner's to enter and remove; a standing allowance raises what may be spent without them (their own model's
   // turn makes it under their mode, method-owner-decision.ts).
-  'payments.purchase.cancel': N, 'payments.cards.create': O, 'payments.cards.delete': O, 'payments.checkout.approve': A,
+  'payments.purchase.cancel': N, 'payments.cards.create': S, 'payments.cards.delete': O, 'payments.checkout.approve': A,
   'payments.standing.create': O, 'payments.standing.delete': N, 'payments.checkout.begin': M,
   // Calendar (calendar.delete cannot be undone).
   'calendar.events.create': N, 'calendar.events.update': N, 'calendar.events.delete': U, 'calendar.ics.import': N,
@@ -153,9 +154,9 @@ const DECLARED: Readonly<Record<string, MethodRisk>> = {
   'mcp.servers.upsert': L, 'mcp.servers.remove': U, 'mcp.servers.tools.block': N, 'mcp.servers.tools.unblock': O,
   'mcp.servers.tools.exempt': O, 'mcp.servers.tools.unexempt': N, 'mcp.servers.trust.set': O, 'mcp.servers.role.set': O,
   'mcp.servers.reload': N, 'mcp.servers.quarantine.accept': O,
-  // Reading out the tool servers' stored secret values (their environment and request headers) is the owner's own act, as
-  // reading out any stored secret is; everyone else reads the redacted view (mcp.config.get).
-  'mcp.servers.reveal': O,
+  // Reading out the tool servers' stored secret values (their environment and request headers) is the user's own read from
+  // every credential of theirs: no class; the scope list of a credential still limits who reaches it.
+  'mcp.servers.reveal': N,
   // Remote peers and the machine group (devices.approve and devices.reject answer the owner).
   'remote.pair.requests.approve': A, 'remote.pair.requests.reject': A, 'remote.peers.token.rotate': O, 'remote.peers.token.revoke': O,
   'remote.peers.disconnect': O, 'remote.peers.invoke': N, 'remote.backends.register': O, 'remote.backends.remove': O,
@@ -166,7 +167,7 @@ const DECLARED: Readonly<Record<string, MethodRisk>> = {
   'memory.records.delete': U, 'memory.records.import': T, 'memory.records.update': T, 'memory.records.links.add': T,
   // Models and providers (provider.finish is the owner's own act; an API key is a secret).
   'models.current.set': N, 'models.refresh': N, 'providers.subscription.signIn.begin': O, 'providers.subscription.signIn.finish': O,
-  'providers.apiKey.set': O,
+  'providers.apiKey.set': S,
   // Batches spend provider money.
   'batch.jobs.create': M, 'batch.jobs.cancel': N, 'batch.providerBatches.cancel': N, 'batch.run': M,
   // Cloudflare (cloudflare.create-token and cloudflare.provision are the owner's own acts).
@@ -203,7 +204,7 @@ const DECLARED: Readonly<Record<string, MethodRisk>> = {
   'local_auth.sessions.delete': O, 'local_auth.bootstrap.delete': O,
   'panels.open': N,
   // The owner's secrets are written and removed by the owner alone.
-  'credentials.set': O, 'credentials.delete': O,
+  'credentials.set': S, 'credentials.delete': O,
   // Settings: a change that loosens is decided by the settings route itself, by the value (VALUE_DECIDED below): for
   // anyone but the owner in person it is refused there, the owner's own act.
   'config.set': L, 'config.setMany': L, 'config.reset': L,
@@ -214,15 +215,14 @@ const DECLARED: Readonly<Record<string, MethodRisk>> = {
   // A hand-off completed is the device the owner just paired taking what the owner's own hand-off offered that very pairing
   // (its notifications, its passkey, once): confined to that offer by its handler, nothing widened.
   'pairing.tokens.revokeShared': O, 'pairing.handoff.create': O, 'pairing.serve.network': O, 'pairing.handoff.complete': N,
-  // The outside agent's own credential: an automation pairing with no project, no person's claim and no administrative
-  // scope (daemon/outside-agent.ts), issued once per daemon to the operator token on this machine (`mcp serve`). It
-  // widens nothing a caller holds, so it is decided under the owner's mode as a loosening, never run as the owner's act.
-  'pairing.outsideAgent.issue': L,
+  // The outside agent's own credential: a pairing with full operator authority (daemon/outside-agent.ts), issued once per
+  // daemon to the operator token on this machine (`mcp serve`). It holds what that token holds, so nothing is asked.
+  'pairing.outsideAgent.issue': N,
   // Serving the daemon beyond this machine widens who reaches it: the owner's own act.
   'tailscale.serve.run': O, 'tailscale.serve.stop': N,
   // A new certificate authority is a new credential every phone is told to trust (and the old one's trust ends): the owner's
   // own act. A new server certificate under the same authority widens nothing.
-  'secureAddress.set': O, 'secureAddress.reissue': N, 'secureAddress.replaceAuthority': O, 'secureAddress.serve': O,
+  'secureAddress.set': S, 'secureAddress.reissue': N, 'secureAddress.replaceAuthority': O, 'secureAddress.serve': O,
   // The capability methods decide each call themselves (routes/capabilities.ts); the program's posts change nothing of the owner's.
   'capabilities.run': N, 'hooks.trace.post': N, 'context.windows.learned.post': N, 'permissions.audit.post': N,
   // Another coding agent, long-running, that runs its own tools under its own rules (agents.host, its capability).
@@ -247,7 +247,7 @@ const DECLARED: Readonly<Record<string, MethodRisk>> = {
   'rewind.conversation.hosts.list': N, 'rewind.conversation.requests.take': N, 'rewind.conversation.requests.answer': A,
   // Registering a workspace lets callers name it as their project.
   'workspaces.registrations.add': O, 'workspaces.registrations.remove': N,
-  'stepup.credentials.register': O, 'stepup.credentials.remove': O,
+  'stepup.credentials.register': S, 'stepup.credentials.remove': O,
   // A step-up challenge is the one-time half of the owner's passkey proof, kept in a bounded table until answered or
   // expired: minting one is the owner's own act (another caller's mints would fill the table, STEP_UP_CHALLENGES_FULL, and
   // leave the owner no step-up), never a read.

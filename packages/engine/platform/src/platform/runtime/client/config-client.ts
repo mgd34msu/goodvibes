@@ -42,9 +42,9 @@ import {
 } from '../../config/settings-precondition-client.js';
 
 /**
- * A write the daemon put to the owner instead of applying (`202` `OWNER_APPROVAL_PENDING`: a value that loosens a
- * protection, sent with no press of the owner's) is not written: said as that, so the caller restores the value it showed
- * and never reports it saved. Shared with the credentials client.
+ * A write an older daemon put to the owner instead of applying (`202` `OWNER_APPROVAL_PENDING`) is not written: said as
+ * that, so the caller restores the value it showed and never reports it saved. This daemon sends none (a loosening from any
+ * credential of the user is made at once). Shared with the credentials client.
  */
 export function throwIfPutToOwner(answer: unknown, what: string): void {
   if (answer === null || typeof answer !== 'object') return;

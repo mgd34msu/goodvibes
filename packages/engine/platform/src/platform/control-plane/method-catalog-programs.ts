@@ -4,10 +4,9 @@
  * (daemon/program-socket.ts), where the kernel names who connected.
  *
  * `pairing.outsideAgent.issue`: `goodvibes-daemon mcp serve` asks, with the operator token, for the one credential of
- * its own this daemon gives an outside agent: an automation pairing with no project and no person's claim, issued once
- * (a second ask while one is kept is refused: revoked among the paired devices, it can be issued again). Every act of
- * its that the owner decides is put to the owner (daemon/method-owner-decision.ts), and the first time it names a project it
- * was not given the owner is asked whether it may work there (daemon/outside-agent-projects.ts).
+ * its own this daemon gives an outside agent: a paired device with full operator authority, issued once (a second ask
+ * while one is kept is refused: revoked among the paired devices, it can be issued again). It is the user's own
+ * credential: it names any project, and nothing is asked for that (daemon/outside-agent.ts).
  */
 import { BOOLEAN_SCHEMA, STRING_SCHEMA, methodDescriptor, objectSchema, type GatewayMethodDescriptor } from './method-catalog-shared.js';
 
@@ -27,12 +26,12 @@ export const builtinGatewayProgramsMethodDescriptors: readonly GatewayMethodDesc
     // A second ask while one is kept is refused; it never makes a second credential.
     repeat: 'safe',
     title: 'Issue the Outside Agent Credential',
-    description: 'The one credential this daemon gives `goodvibes-daemon mcp serve`, asked for with the operator token: a paired-device token named "Outside agent (goodvibes-daemon mcp serve)" (origin automation), with no person\'s claim, answered once with `token` and `id`. Making it is the owner\'s own act: from anyone but the owner it is put to the owner as ONE question, "Let the outside agent "goodvibes-daemon mcp serve" work in <project>?" when the call names the folder it was started in (`project`), else its credential for shared things only; the owner\'s yes issues it and gives it that project. A second ask while it is kept is refused 409 OUTSIDE_AGENT_ISSUED (revoke it among the paired devices to have a new one issued). Every act of it the owner decides is put to the owner, and the first time it names a project it was not given the owneris asked whether it may work there.',
+    description: 'The one credential this daemon gives `goodvibes-daemon mcp serve`, asked for with the operator token: a paired-device token named "Outside agent (goodvibes-daemon mcp serve)" holding full operator authority, as the operator token does, answered once with `token` and `id`. Nothing is asked and nothing is refused: it is issued at once, and it names any project. `project` (the folder the server was started in) is accepted and not needed. A second ask while it is kept is refused 409 OUTSIDE_AGENT_ISSUED (revoke it among the paired devices to have a new one issued).',
     category: 'pairing',
     effects: ['control-plane.administer'],
-    // `project`: the folder the server was started in: the owner's one question names it, and the owner's yes gives it.
+    // `project`: the folder the server was started in; said to the person, not given or checked.
     inputSchema: objectSchema({ confirm: BOOLEAN_SCHEMA, project: STRING_SCHEMA }, []),
-    notWorkFolders: { project: 'the folder the owner\'s one question names and the owner\'s yes gives the outside agent: given through the one project rule (registered, never a folder that can never be a project); nothing works in it by this call' },
+    notWorkFolders: { project: 'the folder the server was started in; accepted and not needed: nothing works in it by this call, and the credential names any project' },
     outputSchema: objectSchema({ id: STRING_SCHEMA, token: STRING_SCHEMA, name: STRING_SCHEMA }, ['id', 'token', 'name']),
     errorCodes: [{ code: 'OUTSIDE_AGENT_ISSUED', status: 409, meaning: 'The outside agent already has its credential from this daemon; revoke it among the paired devices to have a new one issued.' }],
   }),

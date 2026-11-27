@@ -4,8 +4,11 @@
  * daemon's dispatch of a method with a handler, and the daemon's own turns calling a method in process), the dispatch
  * of a method served only by its route, and the REST routes (daemon/http/router.ts).
  *
- * Everything the daemon holds belongs to a project, or to no project (the owner's shared things). A caller that is not
- * the owner in person lists, reads, searches, follows or acts on only what belongs to a project the owner gave it
+ * Everything the daemon holds belongs to a project, or to no project (the user's shared things). Every credential of the
+ * user (a sign-in under any name, a paired device whatever its scope list, the machine's token, the Agent's credential) reaches
+ * all of it: nothing is withheld from the user (`reacherOf(...).everything`). What is held to this rule is a daemon-run turn
+ * (its own project only, `turnProject`) and the other callers that are not the user: they list, read, search, follow or act on
+ * only what belongs to a project that was given them
  * (workspace/caller-project.ts `checkCallerProject`, the same check a project it NAMES passes), whether it reaches the
  * thing by naming a project, by naming none, or by its id:
  *
@@ -17,8 +20,7 @@
  *   that are the same whether the record is another project's or no record at all (they never say it exists elsewhere);
  * - a list or a search a method declares is filtered to what the caller may reach, by the same rule, after the handler.
  *
- * The owner in person (their sign-in, a device they paired in person, their registered program, a program of theirs on this machine:
- * `projectNamerOf`) reaches everything. A daemon-run turn (`clientKind: daemon-turn`, the web chat, a schedule's run, a
+ * The user (`projectNamerOf`) reaches everything. A daemon-run turn (`clientKind: daemon-turn`, the web chat, a schedule's run, a
  * trigger's) is confined to its own project the same way: it is not the owner at large.
  */
 import { tmpdir } from 'node:os';
@@ -31,6 +33,7 @@ import { projectIdentityOf } from '../workspace/project-identity.js';
 import { realPathOf } from '../workspace/caller-project.js';
 import { methodAddressesOf, methodListsOf, type RecordKind } from './record-addresses.js';
 import { isSharedKind, sharedKindReached } from './shared-kinds.js';
+import { ownersDevice } from '../daemon/method-owner-decision.js';
 
 export type { RecordKind } from './record-addresses.js';
 
@@ -115,9 +118,8 @@ export interface Reacher {
    */
   readonly turnFor?: string | undefined;
   /**
-   * The owner's own device (daemon-api actor.ts `ownerDevice`; never the owner in person): it reaches the questions waiting
-   * for the owner, to show and answer them (the approval viewer refuses one it, or a credential made from it, raised), and
-   * otherwise only what a project given to it holds.
+   * A paired device of the user's (`ownersDevice`): it reaches the questions waiting for the user, to show and answer them,
+   * one it raised itself included.
    */
   readonly ownersDevice?: boolean | undefined;
 }
@@ -145,8 +147,9 @@ export function reacherOf(context: ReachContext, body?: unknown): Reacher {
     return { everything: false, namer, principalId: context.principalId, turnProject: project,
       ...(context.call?.othersInput === true ? { turnOnOthersInput: true, ...(context.call.othersInputFor ? { turnFor: context.call.othersInputFor } : {}) } : {}) };
   }
-  const device = context?.credentialKind === 'device-token' && context.actor?.class === 'admin' && context.actor.agentFor === undefined
-    && context.actor.ownerDevice !== undefined;
+  // A paired device is the user's own (method-owner-decision.ts `ownersDevice`): whatever its scope list, nothing of the user's
+  // is withheld from it by this rule (`namer.ownersProgram` is yes for it); the scope list alone limits which methods it calls.
+  const device = ownersDevice({ actor: context?.actor, credentialKind: context?.credentialKind ?? undefined });
   return { everything: namer.ownersProgram, namer, principalId: context?.principalId, ...(device ? { ownersDevice: true } : {}) };
 }
 

@@ -24,7 +24,6 @@ import { createCapabilityOwnerGate, type CallerUsers } from './capability-owner-
 import { capabilityDecidedMark, runActOf, runCoversOf, takeOwnerApprovalGrant, type OwnerApprovedCallGrant } from '../control-plane/owner-approved-call.js';
 import { OWNER_DECIDED_EFFECTS } from '../capabilities/catalog.js';
 import { admitEffects } from '../security/effect-authority.js';
-import { makesOwnerOnlyAct } from './method-owner-decision.js';
 import { turnInputParty } from '../security/turn-input-party.js';
 import { riskOfDescriptor } from '../control-plane/method-risk.js';
 import { conversationExposedNow } from '../security/conversation-exposure.js';
@@ -35,7 +34,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/native-error-summary.js';
 import { isTerminalProgramRegistration } from '../pairing/terminal-program-registration.js';
 import { OUTSIDE_AGENT_ISSUE_METHOD_ID } from '../control-plane/method-catalog-programs.js';
-import { giveOutsideAgentProject, issueOutsideAgent, OUTSIDE_AGENT_NAME } from './outside-agent.js';
+import { issueOutsideAgent, OUTSIDE_AGENT_NAME } from './outside-agent.js';
 import { credentialMakerOfInvocation } from '../control-plane/routes/pairing.js';
 import { CARRIED_UPLOAD_PURPOSE, CARRIED_UPLOADS_KEPT } from '../capabilities/carried-files.js';
 import { resolveGoodVibesDaemonHome } from '../config/goodvibes-home.js';
@@ -249,8 +248,8 @@ export function registerDaemonCapabilities(runtime: Pick<RuntimeServices, 'gatew
     sessionRegistrant: (sessionId) => held.sessionBroker?.registrantOf(sessionId),
   });
   // The outside agent's one credential (daemon/outside-agent.ts): asked for with the operator token on this machine (the
-  // `mcp serve` program, a script to this daemon), decided under the owner's mode, once per daemon. It holds no
-  // administrative scope and no project: it works only in a project the owner in person gives it.
+  // `mcp serve` program, a script to this daemon), once per daemon, nothing asked. It holds full operator authority and
+  // names any project, as the operator token does.
   attachHandler(runtime.gatewayMethods, OUTSIDE_AGENT_ISSUE_METHOD_ID, async (invocation) => {
     const actor = invocation.context.actor;
     if (invocation.context.credentialKind !== 'local' || (actor?.class !== 'owner' && actor?.class !== 'script') || actor.agentFor !== undefined) {
@@ -262,14 +261,8 @@ export function registerDaemonCapabilities(runtime: Pick<RuntimeServices, 'gatew
       throw new GatewayVerbError(`The outside agent already has its credential from this daemon (the paired device "${OUTSIDE_AGENT_NAME}", ${issued.issued}); it is not issued twice.`,
         'OUTSIDE_AGENT_ISSUED', 409, undefined, { next: ['Revoke it among the paired devices (Devices and network) to have a new one issued on the next start.'] });
     }
-    // The project it was started in is given only by the owner in person (who works where is the owner's own act); anyone else's
-    // issue gives none, and the agent works in a project once the owner gives it one in Devices and network.
-    const project = readInvocationParams(invocation)['project'];
-    // The owner in person or the owner's own command line (method-owner-decision.ts `makesOwnerOnlyAct`, the one test).
-    if (typeof project === 'string' && project.trim() && makesOwnerOnlyAct({ actor, credentialKind: invocation.context.credentialKind ?? undefined, registration: invocation.context.call?.registration })) {
-      const given = await giveOutsideAgentProject({ homeDirectory: runtime.shellPaths.homeDirectory }, `pairing:${issued.id}`, project.trim());
-      if (!given.ok) return { id: issued.id, token: issued.token, name: issued.name, project: { given: false, reason: given.reason } };
-    }
+    // The credential holds full authority and names any project: the project the server was started in (`project`) is not
+    // given or checked; nothing is asked and nothing is refused for it.
     return { id: issued.id, token: issued.token, name: issued.name };
   });
   // Every place's count in one call, each made from the place's own lists read as the same caller (place-counts.ts).

@@ -90,17 +90,14 @@ export function approvalViewerOfActor(actor: Actor | undefined, node: string): A
     : actor.class === 'peer' ? 'remote-node'
       : actor.class === 'owner' || actor.class === 'system' ? 'owner-route'
         : actor.class === 'admin' ? 'admin' : 'operator';
-  // The owner's own device (an admin that is never the owner in person) answers, but only a question another caller
-  // raised: never its own, nor one of a credential made from it (approval-lifecycle.ts `answersOthersOnly`).
-  const device = actor.agentFor === undefined && actor.class === 'admin' ? actor.ownerDevice : undefined;
+  // A paired device is the user: it answers any approval, one it raised itself included (no `answersOthersOnly`).
   return {
     kind,
     id: actor.id,
     scopes: actor.scopes === 'all' ? ['*'] : [...actor.scopes],
     node,
-    mayAnswer: admitEffects(actor, ['approval.answer']).kind === 'allowed' || device !== undefined,
+    mayAnswer: admitEffects(actor, ['approval.answer']).kind === 'allowed',
     mayAdminister: admitEffects(actor, ['approvals.administer']).kind === 'allowed',
-    ...(device !== undefined ? { answersOthersOnly: { self: actor.id, madeFromIt: device.madeFromIt } } : {}),
   };
 }
 

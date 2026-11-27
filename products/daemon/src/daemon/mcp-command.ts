@@ -10,22 +10,18 @@
  * frame. The target is resolved exactly as `status`, `sessions` and `cluster`
  * resolve it (--host/--port, defaulting to this machine's daemon).
  *
- * WHICH CREDENTIAL: never the operator token, which every terminal program,
- * command line and script holds. An outside agent is a caller of its own: on
- * first use the daemon issues it one credential (`pairing.outsideAgent.issue`,
- * asked with the operator token and no person's claim: a token for automation
- * named "Outside agent (goodvibes-daemon mcp serve)", with no project), once
- * per daemon whatever address names it; the server keeps it in the daemon's
- * home (`mcp-serve-credentials.json`, by the daemon's identity, readable only
- * by the person's account) and from then on uses only that one. It is listed
- * among the paired devices by that name, where the owner revokes it; a revoked
- * one is not replaced by itself (the server refuses and says how to let it in
- * again). Its calls are an outside caller's, decided by the daemon under the
- * owner's mode, and an answer remembered for it settles nobody else's call. The
- * first time it names a project it was not given (the folder it was started
- * in, unless that can never be a project), whether it may work there is
- * decided under the owner's mode. `--token` gives a credential by hand instead (a
- * paired device's, for a daemon on another machine).
+ * WHICH CREDENTIAL: one of its own. On first use the daemon issues it one
+ * credential (`pairing.outsideAgent.issue`, asked with the operator token: a
+ * paired device named "Outside agent (goodvibes-daemon mcp serve)" holding
+ * full operator authority, as the operator token does), once per daemon
+ * whatever address names it; the server keeps it in the daemon's home
+ * (`mcp-serve-credentials.json`, by the daemon's identity, readable only by the
+ * person's account) and from then on uses only that one. It is listed among the
+ * paired devices by that name, where it is revoked; a revoked one is not
+ * replaced by itself (the server refuses and says how to let it in again). It
+ * is the user's own credential: it names any project, and nothing is asked or
+ * refused for that. `--token` gives a credential by hand instead (a paired
+ * device's, for a daemon on another machine).
  *
  * WHAT IS SERVED by default is two tools, `capability_find` and
  * `capability_run`, over the daemon's `capabilities.find` and
@@ -137,9 +133,8 @@ type OwnCredential = { readonly token: string; readonly mintedId?: string; reado
 /**
  * The outside agent's own credential for this daemon: the one kept for the daemon's identity (whatever address names
  * it), or the one the daemon issues (`pairing.outsideAgent.issue`, asked with the operator token and no person's
- * claim), decided by the daemon under the owner's permission mode as ONE decision that names the project the server was
- * started in. Allowed, the credential is issued with no project: a project is given only by the owner in person (Devices and
- * network, on its row). Under Ask me this start waits on the owner's one answer. Never the operator token for the agent's calls.
+ * claim). It holds full operator authority and names any project; nothing is asked. The agent's calls use this credential,
+ * not the operator token.
  */
 async function outsideAgentCredential(target: { readonly baseUrl: string; readonly token: string }, daemonHomeDir: string, fetchImpl: McpFetch,
   project?: string): Promise<OwnCredential> {
@@ -155,15 +150,12 @@ async function outsideAgentCredential(target: { readonly baseUrl: string; readon
     minted = answer ?? undefined;
   } catch (error) {
     const said = error instanceof Error ? error.message : String(error);
-    if (/CAPABILITY_NOT_APPROVED|not approved/.test(said)) {
-      return { refusal: `the daemon did not let the outside agent have a credential of its own under your permission mode (${said})`, fix: 'give a paired device\'s token with --token, or start it again under a mode that allows it' };
-    }
     if (/OUTSIDE_AGENT_ISSUED|already has its credential/.test(said)) {
       return { refusal: `this daemon issued its credential before (the paired device "${OUTSIDE_AGENT_NAME}") and it is not kept in ${credentialsFile(daemonHomeDir)}`,
         fix: 'revoke it among the paired devices (Devices and network), then start it again; a new one is issued' };
     }
     return { refusal: `a credential of its own could not be had at ${target.baseUrl} (${said})`,
-      fix: 'it never uses the operator token itself; check the daemon with goodvibes-daemon status, or give a paired device\'s token with --token' };
+      fix: 'check the daemon with goodvibes-daemon status, or give a paired device\'s token with --token' };
   }
   if (!minted || typeof minted.token !== 'string' || !minted.token) {
     return { refusal: `the daemon at ${target.baseUrl} gave no credential for it`, fix: 'check the daemon with goodvibes-daemon status, or give a paired device\'s token with --token' };
@@ -178,15 +170,14 @@ async function outsideAgentCredential(target: { readonly baseUrl: string; readon
     return { refusal: `its own credential could not be kept in ${credentialsFile(daemonHomeDir)} (${error instanceof Error ? error.message : String(error)})`,
       fix: 'make that folder writable for this account; the credential made now is listed among the paired devices, where it can be revoked' };
   }
-  // The project given with it: the one the decision named.
+  // The project it was started in, said to the person; none is given (any project is named by a call).
   return { token: minted.token, ...(typeof minted.id === 'string' ? { mintedId: minted.id } : {}), ...(project !== undefined ? { project } : {}) };
 }
 
 /**
  * The project its calls name when they name none: the folder it was started in, unless that folder can never be a
- * project (the root, the home folder itself, anything in or above the GoodVibes or daemon home): then none, and it acts
- * on shared things only. It is given no project by starting anywhere: the first time a call names one it was not
- * given, the daemon asks the owner (daemon/outside-agent.ts).
+ * project (the root, the home folder itself, anything in or above the GoodVibes or daemon home): then none, and a call
+ * that needs a project names one itself (any project, nothing asked).
  */
 function startProject(folder: string, daemonHomeDir: string): { readonly project?: string; readonly why?: string } {
   const home = homedir();
@@ -222,19 +213,17 @@ export async function runMcpCommand(input: RunMcpCommandInput): Promise<number> 
   const fetchImpl: McpFetch = input.fetchImpl;
   // The folder it was started in is the project its calls name when they name none, unless it can never be one.
   const started = startProject(input.workingDirectory ?? process.cwd(), input.daemonHomeDir);
-  // A credential of its own, never the operator token (see the header); one given by hand is used as given. Its first
-  // start is ONE decision under the owner's mode: its credential, with the project it was started in.
+  // A credential of its own (see the header); one given by hand is used as given.
   const own: OwnCredential | undefined = input.flags.token === undefined ? await outsideAgentCredential(resolved.target, input.daemonHomeDir, fetchImpl, started.project) : undefined;
   if (own !== undefined && 'refusal' in own) return refuse(own.refusal, own.fix);
   const ownToken = (): string | undefined => own !== undefined && 'token' in own ? own.token : undefined;
   const target = ownToken() !== undefined ? { ...resolved.target, token: ownToken()! } : resolved.target;
-  // Issued just now. Its project is given only by the owner in person (daemon/capability-wiring.ts, the issue's handler):
-  // this program asks with the operator token, so none is given with it, whatever folder it was started in.
+  // Issued just now (daemon/capability-wiring.ts, the issue's handler): full authority, any project.
   if (own !== undefined && 'mintedId' in own && own.mintedId !== undefined) {
-    input.stderr(`goodvibes-daemon mcp serve: it has a credential of its own now, listed among your paired devices as "${OUTSIDE_AGENT_NAME}"; it acts on shared things only until you give it a project in Devices and network, on its row${own.project !== undefined ? ` (it was started in ${own.project})` : ''}`);
+    input.stderr(`goodvibes-daemon mcp serve: it has a credential of its own now, listed among your paired devices as "${OUTSIDE_AGENT_NAME}"; it works in any project${own.project !== undefined ? ` (it was started in ${own.project})` : ''}`);
   }
   if (started.project === undefined) {
-    input.stderr(`goodvibes-daemon mcp serve: started in ${input.workingDirectory ?? process.cwd()}, which cannot be a project (${started.why}): it acts on shared things only; a call that needs a project names one (workingDirectory), and whether it may work there is decided under your permission mode, or you give it one in Devices and network, on its row`);
+    input.stderr(`goodvibes-daemon mcp serve: started in ${input.workingDirectory ?? process.cwd()}, which cannot be a project (${started.why}): a call that needs a project names one (workingDirectory)`);
   }
   // Prove the daemon answers and accepts the token before the first frame, so a
   // client sees a failed launch rather than a server whose every tool errors.

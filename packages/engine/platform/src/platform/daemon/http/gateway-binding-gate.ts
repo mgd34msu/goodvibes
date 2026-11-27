@@ -7,7 +7,6 @@ import { EFFECTS, admitRules, declaredAccessRules, type EffectAdmission, type Ef
 import { catalogPathname, declaredRouteDescriptor } from './route-manifest.js';
 import { pairingGrant } from '../../security/http-auth.js';
 import { OWN_SESSION_FOLLOW_SCOPES } from '../../control-plane/gateway-scope-enforcement.js';
-import { SHARED_KIND_NOT_GIVEN, sharedKindGiven, sharedKindOfMethod, sharedKindRefusalWords } from '../../control-plane/shared-kinds.js';
 
 type GatewayRefusal = { status: number; ok: false; body: Record<string, unknown> };
 
@@ -21,30 +20,11 @@ function heldScopes(actor: Actor): readonly string[] {
 }
 
 /**
- * Who a call is admitted as. A method of one of the owner's shared kinds (control-plane/shared-kinds.ts) is opened by the
- * owner's gift of that kind, not by a class or a scope: a paired device, a member or an admin that is not the owner, given
- * the kind, uses its reads and its acts as an admin does. Never the owner's own acts (a row only the owner causes stays
- * refused), never a model acting for someone (its turn is held to the gift of whom it acts for, shared-kind-gifts.ts).
+ * Who a call is admitted as: the actor, unchanged. The class and the scopes of a credential alone admit a method (as
+ * released); no gift of one of the user's shared kinds (control-plane/shared-kinds.ts) is needed or read here.
  */
-function admittedAs(descriptorId: string, actor: Actor): Actor {
-  if (actor.agentFor !== undefined || (actor.class !== 'device' && actor.class !== 'member' && actor.class !== 'admin')) return actor;
-  if (!sharedKindGiven(descriptorId, actor.id)) return actor;
-  return { ...actor, class: 'admin', scopes: 'all', ownerDevice: undefined };
-}
-
-/**
- * A call of a shared kind refused for its class or a scope, by a caller the owner did not give that kind: the refusal
- * says what was not given and where the owner gives it (shared-kinds.ts `sharedKindRefusalWords`).
- */
-function notGivenRefusal(descriptor: Pick<GatewayMethodDescriptor, 'id'>, admission: Exclude<EffectAdmission, { kind: 'allowed' }>, actor: Actor): GatewayRefusal | null {
-  if (admission.kind !== 'refused' || admission.code !== 'MISSING_RIGHT' || admission.missing === 'peer') return null;
-  if (actor.agentFor !== undefined || (actor.class !== 'device' && actor.class !== 'member' && actor.class !== 'admin')) return null;
-  const kind = sharedKindOfMethod(descriptor.id);
-  if (kind === undefined || sharedKindGiven(descriptor.id, actor.id)) return null;
-  return { status: 403, ok: false, body: {
-    error: `Not done: ${sharedKindRefusalWords(kind, false)}. Nothing was read or changed.`, code: SHARED_KIND_NOT_GIVEN, category: 'authorization', status: 403,
-    effect: admission.effect, kind, next: [`Ask the owner to give this caller their ${kind} in Devices and network, on its row.`],
-  } };
+function admittedAs(_descriptorId: string, actor: Actor): Actor {
+  return actor;
 }
 
 /** The wire body of an admission refusal: the codes clients branch on, with the effect and what is missing. */
@@ -106,7 +86,7 @@ export function refuseGatewayAccess(
     return { status: 401, ok: false, body: { error: `${descriptor.id} needs an authenticated caller.`, code: 'AUTH_REQUIRED', category: 'authentication', status: 401 } };
   }
   const admission = admitRules(admittedAs(descriptor.id, actor), rules);
-  return admission.kind === 'allowed' ? null : notGivenRefusal(descriptor, admission, actor) ?? refusalOf(descriptor, admission, actor);
+  return admission.kind === 'allowed' ? null : refusalOf(descriptor, admission, actor);
 }
 
 /**

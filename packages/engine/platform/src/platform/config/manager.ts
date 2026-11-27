@@ -1880,8 +1880,8 @@ export class ConfigManager {
    * reference, and a change that loosens a security, permission, judgment or
    * payment setting is admitted for the actor making it (`settings.loosen` in
    * the effect table, security/effect-authority.ts): the owner and the program
-   * make it, an admin's is the owner's to decide and is refused here (the
-   * daemon's routes put it to the owner first), anyone else is refused; a model
+   * make it (the user from any credential: a sign-in under any name, a full
+   * pairing, the operator token); a device holding a narrow scope list is refused, as released; a model
    * (`agentActor`) makes it only when the owner, their standing rule or the mode
    * settled the call (`options.decision`, the gate's decision, read by
    * tools/goodvibes-runtime/config-routing.ts from gate/admitted-decision.ts).

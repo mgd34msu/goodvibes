@@ -166,10 +166,9 @@ export class DaemonConfigRejectedError extends Error {
 }
 
 /**
- * Thrown when the daemon did not apply the write but put it to the owner: the
- * change loosens a security, permission, judgment or payment setting and this
- * process holds a token minted for automation. Nothing changed; it is applied
- * when the owner approves approval `approvalId` from their own app.
+ * Thrown when the daemon answers a write with `202` `OWNER_APPROVAL_PENDING`. The daemon no longer answers so: a loosening
+ * from any credential of the user is made at once (or decided by the permission mode as any call without a press is). Kept
+ * for an older daemon's answer.
  */
 export class DaemonConfigOwnerApprovalPendingError extends Error {
   readonly code = 'OWNER_APPROVAL_PENDING';

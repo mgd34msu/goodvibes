@@ -11,15 +11,13 @@
  *   folder or anything in one (`~/.ssh`, `~/.gnupg`, `~/.config`), never a system folder (`/etc`, `/var`, `/usr`, `/root`
  *   and the like, unless the home folder lives there), never the GoodVibes or daemon home, anything inside one or any
  *   folder above one; registering a workspace is held to the same rule (registration/store.ts);
- * - it must be a registered workspace or inside one (the shared register is where the owner's trust decisions are kept
- *   too), unless the caller is the owner in person or their own program, by who it is (their sign-in, a device they paired, their
- *   registered terminal program, their Agent program, a turn the daemon hosts: `projectNamerOf`), whose every project is
- *   theirs; the operator token or the Agent's credential alone is a script. The folder the daemon was started in is no
- *   exception: the daemon's own working folder is in its home (`<daemon home>/own-folder`), which no project is, and the
- *   folder it was started from means nothing to it, so a device works there only once the owner registered it;
- * - any other caller (a paired device, a signed-in member) may name only a project the owner assigned to it
- *   (caller-projects-store.ts, set from the Devices place); with none assigned it names no project and acts on shared
- *   things only.
+ * - the user names any project, from every credential: a sign-in under any name, a paired device whatever its scope list,
+ *   the machine's token, the Agent's credential, a command line, a turn the daemon hosts (`projectNamerOf`); no project has
+ *   to be given to it. The folder the daemon was started in is no exception: the daemon's own working folder is in its home
+ *   (`<daemon home>/own-folder`), which no project is;
+ * - a caller that is not the user (no credential of the user's reaches here as one) must name a registered workspace or
+ *   one inside it, and a project assigned to it (caller-projects-store.ts, which keeps what was assigned and passes
+ *   through).
  */
 import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -168,12 +166,10 @@ export function checkCallerProject(raw: string, who: ProjectNamer, facts: Caller
 }
 
 /**
- * Who names a project, for {@link checkCallerProject}: the owner's own program by WHO it is, never by the kind of
- * credential it holds (daemon/method-owner-decision.ts `ownersProgramCaller`: the owner in person, their sign-in, a device they
- * paired in person, their registered terminal program; their Agent program's model; a turn the daemon hosts), whose every
- * project is theirs without their giving it to themselves. The operator token from a script or from another machine, and the
- * Agent's credential without its program, are scripts: like a member, an admin who is not the owner and every other
- * device, they name only the projects the owner gave them.
+ * Who names a project, for {@link checkCallerProject}: the user from every credential (daemon/method-owner-decision.ts
+ * `ownersProgramCaller`: any sign-in, any paired device, the operator token from any process, a command line, the Agent's
+ * credential, a turn the daemon hosts), whose every project is theirs without giving it to themselves. A daemon-run turn
+ * (`turnProject`) names its own project only.
  */
 export function projectNamerOf(caller: {
   readonly credentialKind?: CredentialKind | null | undefined;

@@ -1,15 +1,11 @@
 /**
- * Whether a message is the owner's own, typed by them, read with the ONE definition of the owner in person
- * (daemon/method-owner-decision.ts `ownerHimself`): their signed-in session, a device they paired, or their own terminal
- * program the daemon registered (the operator token alone is a script, wherever it is held). Read from what the daemon
- * established for the request (its principal, the registration it checked and bound), never from a label a request
- * sends.
+ * Whether a message is the user's own, read with the ONE definition of the user (daemon/method-owner-decision.ts
+ * `ownerHimself`): a sign-in under any name, any paired device, the operator token from any process. Read from what the
+ * daemon established for the request (its principal), never from a label a request sends.
  *
- * - `ownerHimselfOf`: the web chat's message, edit and steer (companion-chat-routes.ts `isOwnerRequest`): the owner's
- *   turn, or someone else's input.
+ * - `ownerHimselfOf`: the web chat's message, edit and steer (companion-chat-routes.ts `isOwnerRequest`).
  * - `ownerTypedAtProgram`: a message sent into a session the daemon hosts (daemon-api runtime-session-routes.ts
- *   `OWNER_TYPED_METADATA_KEY`): the owner in person, naming itself a terminal app or the Agent, with a person's claim.
- *   Only then does the session run it as the owner's own turn in its project; anything else stays an input-only instruction.
+ *   `OWNER_TYPED_METADATA_KEY`): the session runs it as the user's own turn in its project.
  */
 import type { RequestPrincipal } from '../http-policy.js';
 import { makesOwnerOnlyAct, ownerHimself } from '../method-owner-decision.js';
@@ -31,9 +27,10 @@ export function makesOwnerOnlyActOf(principal: RequestPrincipal | null | undefin
   return makesOwnerOnlyAct({ actor: principal.actor, credentialKind: principal.credentialKind, registration });
 }
 
-export function ownerTypedAtProgram(principal: RequestPrincipal | null | undefined, headers: Headers, registration: string | undefined): boolean {
-  if (!ownerHimselfOf(principal, registration)) return false;
-  const program = headers.get('x-goodvibes-client')?.trim().toLowerCase();
-  if (program !== 'tui' && program !== 'agent') return false;
-  return headers.get('x-goodvibes-explicit-user-request')?.trim().toLowerCase() === 'true';
+/**
+ * Input sent into a hosted session from any credential of the user is the user's own: no program label, registration or
+ * person's claim is asked for (the daemon's input-origin rules for guests, channels and webhooks are not decided here).
+ */
+export function ownerTypedAtProgram(principal: RequestPrincipal | null | undefined, _headers: Headers, registration: string | undefined): boolean {
+  return ownerHimselfOf(principal, registration);
 }

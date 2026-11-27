@@ -100,7 +100,7 @@ const SHORTCUT_FIELDS = ['prompt', 'cursorPos', 'commandMode', 'autocomplete', '
   'requestRender', 'scroll', 'handleCopy', 'handleCtrlC', 'handleBlockCopy', 'handleBookmark', 'handleBlockSave',
   'handleUndo', 'handleRedo', 'handlePaste', 'handleEscape', 'keybindingsManager'] as const;
 const MODAL_FIELDS = ['conversationManager', 'selectionModal', 'bookmarkModal', 'mcpWorkspace',
-  'sessionPickerModal', 'profilePickerModal', 'historySearch', 'prompt', 'cursorPos', 'modelPicker', 'commandContext',
+  'sessionPickerModal', 'historySearch', 'prompt', 'cursorPos', 'modelPicker', 'commandContext',
   'getViewportHeight', 'requestRender', 'handleEscape', 'contextInspectorModal',
   'filePicker', 'imageRegistry', 'nextImageId', 'saveUndoState', 'blockActionsMenu', 'executeBlockAction', 'searchManager',
   'scroll', 'getScrollTop', 'openModelPickerWithTarget', 'openProviderModelPickerWithTarget', 'onModelPickerCommit'] as const;

@@ -12,6 +12,7 @@
  * and project index, caches of the subfolder's files that the project's are built again from (one per project).
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { assertProjectFolderReachable } from '../workspace/project-folder-guard.js';
 import { join, resolve } from 'node:path';
 import { projectFolderOf } from './shell-paths.js';
 import { projectStoreLockPath } from './session-surface.js';
@@ -53,6 +54,7 @@ export function carrySubfolderRecords(openedFolder: string, projectFolder: strin
   if (carriedNow().includes(resolve(openedFolder))) return undefined;
   const result: RecordsCarryResult = { copied: [], merged: [], singleValues: [], failed: [] };
   try {
+    assertProjectFolderReachable(target);
     mkdirSync(target, { recursive: true });
     // The whole carry runs alone among every program and the daemon in the project: under the project's checkpoint
     // store lock (session-surface.ts projectStoreLockPath), with the record of what was carried read again under it,

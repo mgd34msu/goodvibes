@@ -23,7 +23,6 @@ export type FeedContextStableKeys =
   | 'bookmarkModal'
   | 'mcpWorkspace'
   | 'sessionPickerModal'
-  | 'profilePickerModal'
   | 'historySearch'
   | 'commandRegistry'
   | 'commandContext'
@@ -118,7 +117,6 @@ const STABLE_HOST_KEYS = [
   'bookmarkModal',
   'mcpWorkspace',
   'sessionPickerModal',
-  'profilePickerModal',
   'historySearch',
   'commandRegistry',
   'commandContext',

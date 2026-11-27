@@ -907,6 +907,8 @@ interface AuthenticAutonomousAdmission {
   readonly assertCurrent: () => void;
   readonly assertWorkspace: () => void;
   readonly assertEffect: (effect: ToolExecutionEffect) => void;
+  /** The owner approved this call in person on a channel request's card: it runs as the owner's own call (`isOwnerDirectedAdmission`). */
+  readonly ownerDirected?: true | undefined;
   readonly nestedOwner: AutonomousNestedOwner;
   readonly settingsBinding?: ToolPreparedSettingsMutation | undefined;
   readonly nestedSettingsBindings: Set<ToolPreparedSettingsMutation>;
@@ -926,6 +928,12 @@ const authenticConfigTransitions = new WeakMap<() => void, NonNullable<Authentic
 const consumedAdmissionRecords = new WeakMap<() => void, AuthenticAutonomousAdmission>();
 const workspaceConstraints = new WeakMap<() => void, () => void>();
 const effectConstraints = new WeakMap<() => void, (effect: ToolExecutionEffect) => void>();
+const ownerDirectedGuards = new WeakSet<() => void>();
+
+/** @internal Whether the consumed admission behind this call's guard was the owner's approval of a channel request, given in person. */
+export function isOwnerDirectedAdmission(guard: (() => void) | undefined): boolean {
+  return guard !== undefined && ownerDirectedGuards.has(guard);
+}
 
 /** @internal Original recorded source retained only by consumed execution guards. */
 export interface AutonomousNestedOwner {
@@ -1053,6 +1061,7 @@ export function consumeAutonomousAdmission(admission: AutonomousPermissionAdmiss
   consumedAdmissionRecords.set(record.assertCurrent, record);
   workspaceConstraints.set(record.assertCurrent, record.assertWorkspace);
   effectConstraints.set(record.assertCurrent, record.assertEffect);
+  if (record.ownerDirected === true) ownerDirectedGuards.add(record.assertCurrent);
   nestedOwners.set(record.assertCurrent, record.nestedOwner);
   if (record.assertConfigTransition) authenticConfigTransitions.set(record.assertCurrent, record.assertConfigTransition);
   if (record.settingsPresentation) settingsPresentations.set(record.assertCurrent, record.settingsPresentation);
@@ -1569,6 +1578,7 @@ export class PermissionManager {
       const record: AuthenticAutonomousAdmission = {
         issuer: this, registry: preparedCall?.registry, call: preparedCall?.call, claim: admission.claim, consumed: false, assertWorkspace,
         settingsBinding: settingsMutation, nestedSettingsBindings, parents,
+        ...(ownerDirected ? { ownerDirected: true as const } : {}),
         nestedOwner: Object.freeze({ manager: this, source, decoratePort: options.decoratePort, sessionId: options.sessionId }),
         assertEffect: effect => {
           if ((effect !== 'write' && effect !== 'send') || (effectReadOnly && !(effect === 'send' && sendIsTheRead)) || effectWriteDenied

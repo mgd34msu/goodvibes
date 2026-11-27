@@ -65,6 +65,12 @@ async function tool(context: StoreActContext, name: string, args: Record<string,
   return { text, ...(data ? { data } : {}) };
 }
 
+/** The model's tool leads a read with a warning to the model about text it did not write; a person is shown the read. */
+function withoutModelWarning(text: string): string {
+  const warning = `${UNTRUSTED_ARTIFACT_NOTICE}\n`;
+  return text.startsWith(warning) ? text.slice(warning.length) : text;
+}
+
 /** A change to a draft: one call of agent_documents in `mode`. */
 function draftChange(mode: string, label: string, args: (values: ActionValues) => Record<string, unknown>): StoreAct {
   return async (values, context) => {
@@ -82,15 +88,14 @@ export const DRAFT_ACTS: Readonly<Record<string, StoreAct>> = {
     const from = Number.isFinite(skipped) && skipped > 0 ? Math.trunc(skipped) : 0;
     const listed = await tool(context, 'agent_artifacts', { mode: 'list', ...(values.words ? { query: values.words } : {}), ...given(values, 'kind', 'mimeType', 'purpose', 'source'), ...(limit ? { limit } : {}), ...(from ? { offset: from } : {}) },
       'list saved artifacts', { artifacts: listedArtifacts(context, values) });
-    // The model's tool leads its list with a warning to the model about names it did not write; a person is shown the list.
-    const warning = `${UNTRUSTED_ARTIFACT_NOTICE}\n`;
-    return { ...listed, text: listed.text.startsWith(warning) ? listed.text.slice(warning.length) : listed.text };
+    return { ...listed, text: withoutModelWarning(listed.text) };
   },
   async 'artifacts.show'(values, context) {
     const previewBytes = positiveNumber(values.bytes);
     const found = storeStep(() => context.artifacts.list(Number.MAX_SAFE_INTEGER)).find((artifact) => artifact.id === values.artifact);
-    return tool(context, 'agent_artifacts', { mode: 'show', artifactId: values.artifact!, includeContent: values.preview !== 'no', ...(previewBytes ? { previewBytes } : {}) },
+    const shown = await tool(context, 'agent_artifacts', { mode: 'show', artifactId: values.artifact!, includeContent: values.preview !== 'no', ...(previewBytes ? { previewBytes } : {}) },
       `show artifact ${values.artifact}`, found ? { artifact: artifactFacts(found) } : undefined);
+    return { ...shown, text: withoutModelWarning(shown.text) };
   },
   /** A turn's artifact (media, a comparison, a research report) saved by the daemon in its one store. */
   async 'artifacts.save'(values, context) {

@@ -5,13 +5,13 @@ import { isTrackedModal, type StackedModal } from '../surface-modal-host.js';
 export type ModalEntry = readonly [name: string, active: boolean, render: () => SurfaceLayer | null];
 type ActiveModal = { readonly active: boolean };
 type CommonConversationModals = Readonly<Record<'modelPicker' | 'mcpWorkspace' | 'sessionPickerModal'
-  | 'profilePickerModal' | 'bookmarkModal' | 'blockActionsMenu' | 'selectionModal' | 'contextInspectorModal', ActiveModal>> & {
+  | 'bookmarkModal' | 'blockActionsMenu' | 'selectionModal' | 'contextInspectorModal', ActiveModal>> & {
   readonly surfaceModals: { modals(): readonly StackedModal[] };
 };
 /** Product-only workspaces join this predicate at their composition boundary; a kit modal (the settings screen, a place) is one. */
 export function isCommonConversationModalOpen(input: CommonConversationModals): boolean {
   return input.modelPicker.active || input.mcpWorkspace.active || input.sessionPickerModal.active
-    || input.profilePickerModal.active || input.bookmarkModal.active || input.blockActionsMenu.active || input.selectionModal.active
+    || input.bookmarkModal.active || input.blockActionsMenu.active || input.selectionModal.active
     || input.contextInspectorModal.active
     || input.surfaceModals.modals().some((modal) => !isTrackedModal(modal));
 }

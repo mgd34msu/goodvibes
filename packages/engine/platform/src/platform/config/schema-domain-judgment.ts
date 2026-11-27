@@ -10,13 +10,10 @@ import type { ConfigSettingRow } from './schema-types.js';
 import { validJudgmentFallbackSettings, validJudgmentCredentialName } from './judgment-fallback-settings.js';
 import { captureJudgmentBackendSettings, validEndpointURL } from '@goodvibes/judgment/decisions';
 import { captureJudgmentVolumeMonitorControl } from '../observe/judgment-volume-monitor.js';
-import { DECISION_MODEL_POLICIES, DECISION_MODEL_POLICY_LABELS } from '@goodvibes/engine/errors';
 
 export const judgmentConfigDefaults: { judgment: JudgmentSettings } = {
   judgment: {
     volumeMonitor: captureJudgmentVolumeMonitorControl({}),
-    // "When the decision model is missing or fails": Hybrid by default, as released. An install that never set it follows
-    // this default; one that set it keeps its value.
     policy: 'Hybrid',
     endpoint: '',
     keySource: 'env',
@@ -63,9 +60,8 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
   {
     key: 'judgment.policy', type: 'enum',
     label: 'When the decision model is missing or fails',
-    enumValues: [...DECISION_MODEL_POLICIES],
-    enumLabels: DECISION_MODEL_POLICY_LABELS,
-    description: 'Who answers is set in one place, When GoodVibes asks (permissions.mode); this setting only says what happens while a set decision model fails. Hybrid (default): while it fails, each decision takes its own fallback (a permission call comes to you instead, or is held to the end of the run in Just vibes), and the failure is shown once with the model, what failed and the next step. Decision Model Only: while it fails, a call it would have decided is refused with its error and the turn goes on. With no decision model set up, Jev decides asks you as Ask me does and Just vibes holds what needs a decision to the end of the run, whatever this says. YOLO asks no decision model, so this setting does not change it.',
+    enumValues: ['Hybrid', 'Decision Model Only', 'No Decision Model'],
+    description: 'Who answers is set in one place, When GoodVibes asks (permissions.mode); this setting only says what happens while a set decision model fails, or that none is used. Hybrid (default): while it fails, each decision takes its own fallback (a permission call comes to you instead, or is held to the end of the run in Just vibes), and the failure is shown once with the model, what failed and the next step. Decision Model Only: while it fails, a call it would have decided is refused with its error and the turn goes on. No Decision Model: no decision model is asked, as with none set, and every decision takes its fallback (a permission call comes to you, or is held in Just vibes). YOLO asks no decision model, so this setting does not change it.',
   },
   {
     key: 'judgment.endpoint',

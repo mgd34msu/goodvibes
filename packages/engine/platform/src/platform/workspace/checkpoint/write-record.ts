@@ -24,6 +24,7 @@
  */
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync } from 'node:fs';
+import { assertProjectFolderReachable } from '../project-folder-guard.js';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { onFileWritten, type FileWritten } from '../../state/file-cache.js';
 import { withCrossProcessLockSync } from './cross-process-lock.js';
@@ -114,6 +115,7 @@ function keep(write: FileWritten): void {
       moveAsideWhenFull(entry);
     } catch (error) {
       try {
+        assertProjectFolderReachable(entry.record);
         mkdirSync(join(entry.record, '..'), { recursive: true });
         appendFileSync(entry.record, line);
       } catch {

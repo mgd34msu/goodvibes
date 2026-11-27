@@ -47,39 +47,6 @@ export function createSearchableModalTokenRoute<State extends ModalRouteState>(p
   };
 }
 
-export interface ProfilePickerRouteState<Config> extends ModalRouteState {
-  readonly profilePickerModal: SearchableModal & {
-    cancelDeleteConfirmation?(): boolean;
-    loadSelected(config: Config): void;
-    deleteSelected(): void;
-    saveCurrentAs(name: string, config: Config): void;
-  };
-  readonly commandContext?: { readonly platform: { readonly configManager: Config } } | undefined;
-}
-export function createProfilePickerTokenRoute<Config>(cancelDeleteConfirmation: boolean) {
-  type State = ProfilePickerRouteState<Config>;
-  // Ctrl+D arms (then confirms) deleting the selected profile and Ctrl+S saves
-  // the current settings; the bare letters are search text.
-  const act = (state: State, key: string, ctrl: boolean): void => {
-    if (!ctrl) return;
-    if (key === 'd') state.profilePickerModal.deleteSelected();
-    else if (key === 's') {
-      const config = state.commandContext?.platform.configManager;
-      if (config) state.profilePickerModal.saveCurrentAs('profile-' + Date.now(), config);
-    }
-  };
-  return createSearchableModalTokenRoute<State>({
-    modal: (state) => state.profilePickerModal,
-    editEmptyQuery: false,
-    enter(state) {
-      const config = state.commandContext?.platform.configManager;
-      if (config) state.profilePickerModal.loadSelected(config);
-    },
-    cancelConfirmation: (state) => cancelDeleteConfirmation && (state.profilePickerModal.cancelDeleteConfirmation?.() ?? false),
-    namedKey: act,
-  });
-}
-
 interface SessionPickerDeleteState {
   readonly sessionPickerModal: { deleteSelected(): void };
 }

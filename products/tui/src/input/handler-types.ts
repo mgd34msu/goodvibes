@@ -27,7 +27,6 @@ import type { BookmarkModal } from './bookmark-modal.ts';
 import type { McpWorkspace } from './mcp-workspace.ts';
 import type { SessionPickerModal } from './session-picker-modal.ts';
 import type { ConfigModal } from './config-modal.ts';
-import type { ProfilePickerModal } from '@goodvibes/engine/terminal-shell/profile-picker-state';
 import type { ContextInspectorModal } from '../renderer/context-inspector.ts';
 import type { FilePickerModal } from './file-picker.ts';
 import type { BlockActionsMenu } from '../renderer/block-actions.ts';
@@ -104,7 +103,6 @@ export interface InputHandlerLike {
   bookmarkModal: BookmarkModal;
   mcpWorkspace: McpWorkspace;
   sessionPickerModal: SessionPickerModal;
-  profilePickerModal: ProfilePickerModal;
   configModal: ConfigModal;
   contextInspectorModal: ContextInspectorModal;
   modelPicker: ModelPickerModal;

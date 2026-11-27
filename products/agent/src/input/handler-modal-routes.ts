@@ -1,8 +1,5 @@
 import { sessionPickerDeleteNamedKey } from '@goodvibes/engine/terminal-shell/searchable-modal-route';
-import {
-  createSearchableModalTokenRoute,
-  createProfilePickerTokenRoute,
-} from '@goodvibes/engine/terminal-shell/searchable-modal-route';
+import { createSearchableModalTokenRoute } from '@goodvibes/engine/terminal-shell/searchable-modal-route';
 // The settings screen is the one both programs show (terminal-shell settings-screen), a kit modal that reads its own keys.
 export { handleSelectionModalToken, handleBookmarkModalToken } from '@goodvibes/engine/terminal-shell/modal-input-routes';
 
@@ -32,5 +29,3 @@ export const handleSessionPickerToken = createSearchableModalTokenRoute<SessionP
 
   namedKey: sessionPickerDeleteNamedKey,
 });
-
-export const handleProfilePickerToken = createProfilePickerTokenRoute<CommandContext['platform']['configManager']>(false);

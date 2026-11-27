@@ -29,6 +29,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { assertProjectFolderReachable } from '../project-folder-guard.js';
 import { join, relative, isAbsolute, dirname, sep } from 'node:path';
 import type { SimpleGit } from 'simple-git';
 import { createSimpleGit } from '../../git/optional-simple-git.js';
@@ -189,6 +190,7 @@ export class SideGitRunner {
    */
   async init(): Promise<void> {
     if (!existsSync(this.gitDir)) {
+      assertProjectFolderReachable(this.gitDir);
       mkdirSync(this.gitDir, { recursive: true });
     }
     const alreadyInit = existsSync(join(this.gitDir, 'HEAD'));
@@ -220,6 +222,7 @@ export class SideGitRunner {
     const goodvibesDir = join(this.workspaceRoot, '.goodvibes');
     const ignorePath = join(goodvibesDir, '.gitignore');
     if (!existsSync(goodvibesDir)) {
+      assertProjectFolderReachable(goodvibesDir);
       mkdirSync(goodvibesDir, { recursive: true });
     }
     try {
@@ -253,6 +256,7 @@ export class SideGitRunner {
     const pattern = `/${rel.split(sep).join('/').replace(/[\\*?[\]]/g, '\\$&')}/`;
     const excludePath = join(this.gitDir, 'info', 'exclude');
     try {
+      assertProjectFolderReachable(excludePath);
       mkdirSync(dirname(excludePath), { recursive: true });
       const existing = existsSync(excludePath) ? readFileSync(excludePath, 'utf-8') : '';
       if (existing.split('\n').some((line) => line === pattern)) return;

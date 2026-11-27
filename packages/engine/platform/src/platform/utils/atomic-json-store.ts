@@ -96,6 +96,7 @@ import { basename, dirname, isAbsolute, join, parse, sep } from 'node:path';
 import type { BigIntStats, Stats } from 'node:fs';
 import { open as openFileHandle, type FileHandle } from 'node:fs/promises';
 import { logger } from './logger.js';
+import { assertProjectFolderReachable } from '../workspace/project-folder-guard.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 
 /**
@@ -332,6 +333,7 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effec
   if (!mkdirp && absent.size) throw Object.assign(new Error('Atomic publication parent does not exist'), { code: 'ENOENT' });
   for (const path of [...absent]) {
     assertOwner(); current(!concurrentInitialCreation); let made = false;
+    assertProjectFolderReachable(path);
     try { mkdirSync(path); made = true; }
     catch (error) { if (!concurrentInitialCreation || (error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
     const created = lstatSync(path, { bigint: true });
@@ -426,6 +428,8 @@ function ensureAtomicParent(dir: string, mkdirp: boolean, beforeCreate: (() => v
   const existing = statSync(dir, { throwIfNoEntry: false });
   if (existing === undefined) {
     if (!mkdirp) throw Object.assign(new Error(`Atomic publication parent does not exist: ${dir}`), { code: 'ENOENT' });
+    // Nothing is made under a project folder that cannot be reached now (its disk is not mounted).
+    assertProjectFolderReachable(dir);
     beforeCreate?.();
     const first = mkdirSync(dir, { recursive: true });
     if (first !== undefined) {

@@ -22,7 +22,8 @@ import { deferUntrustedIngests, getProcessUntrustedContentLedger, type Untrusted
 import { type JudgmentPort } from '@goodvibes/judgment';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { PermissionCheckResult } from '../permissions/types.js';
-import { assertAutonomousConfigTransition, completeAutonomousConfigTransition, bindAutonomousNestedAdmission, readAutonomousSettingsPresentation, readAutonomousWorkspaceConstraint, readAutonomousEffectConstraint, readAutonomousNestedOwner, consumeAutonomousAdmission, type AutonomousNestedOwner, type AutonomousPermissionAdmission, type PermissionManager } from '../permissions/manager.js';
+import { runAsOwnerDirectedCall } from '../security/turn-input-party.js';
+import { assertAutonomousConfigTransition, completeAutonomousConfigTransition, bindAutonomousNestedAdmission, readAutonomousSettingsPresentation, readAutonomousWorkspaceConstraint, readAutonomousEffectConstraint, readAutonomousNestedOwner, consumeAutonomousAdmission, isOwnerDirectedAdmission, type AutonomousNestedOwner, type AutonomousPermissionAdmission, type PermissionManager } from '../permissions/manager.js';
 import type { AutonomousChoiceProjection } from '../permissions/autonomous-input-projection.js';
 import { captureAutonomousSource } from '../permissions/autonomous.js';
 import { toolAskWords } from '../permissions/tool-ask-words.js';
@@ -1666,7 +1667,9 @@ export class ToolRegistry {
         : opts === undefined || projectionProperty(opts, 'inputProjectionContext') === undefined ? opts : Object.freeze({ signal, callId, ...(onProgress ? { onProgress } : {}) });
       assertProjectionCurrent(assertCurrent, effectiveArgs);
       if (executionOptions) ordinaryCallRegistries.set(executionOptions, this);
-      const result = await executingContext.run(undefined, () => tool.execute(effectiveArgs, executionOptions));
+      // A call the owner approved in person on a channel request's card runs as the owner's own call (security/turn-input-party.ts
+      // `runAsOwnerDirectedCall`): its command is not held to the read-only sandbox of a turn on someone else's input.
+      const result = await runAsOwnerDirectedCall(isOwnerDirectedAdmission(assertCurrent), () => executingContext.run(undefined, () => tool.execute(effectiveArgs, executionOptions)));
       assertProjectionCurrent(assertCurrent, effectiveArgs);
       const toolResult = { ...result, callId };
       if (repair.warnings?.length) toolResult.warnings = [...(toolResult.warnings ?? []), ...repair.warnings];

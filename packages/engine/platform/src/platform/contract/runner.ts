@@ -532,13 +532,20 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
    * Hands the ended contract's worktree, and the captured input view made for it, to the retention rules.
    * Never throws: a tree that stays is only disk use.
    */
-  function releaseEndedWorktree(contract: Contract): void {
+  function releaseEndedWorktree(run: ContractRun): void {
+    const { contract } = run;
     const worktrees = deps.worktrees ?? new WorktreeRegistry(contract.projectRoot);
     // The captured input is the person's own checkout as it was, so a commit made only to capture it is no work of
     // the contract's; the work-item trees nested in the contract's tree also count the contract's branch as kept.
     const baseCommits = contract.inputSnapshot === undefined ? [] : [contract.inputSnapshot.inputCommit];
+    // A step's own tree and branch (`ws-owned/<id>`) sit beside the contract's, not inside it: they end with the work
+    // too. A tree holding changes or commits the contract's branch lacks is kept by the same rules as the contract's own.
+    const stepBases = [...baseCommits, ...(contract.branch === undefined ? [] : [`refs/heads/${contract.branch}`])];
+    const stepTrees = (run.engine?.listWorkstreams() ?? []).flatMap((workstream) => workstream.items)
+      .flatMap((item) => item.worktreePath === undefined ? [] : [{ path: item.worktreePath, baseBranch: contract.baseBranch, baseCommits: stepBases }]);
     const targets = [{ path: contract.worktreePath!, baseBranch: contract.baseBranch, baseCommits, nestedBase: contract.branch },
-      ...(contract.inputSnapshot === undefined ? [] : [{ path: contractInputPath(contract.inputSnapshot), baseBranch: contract.baseBranch, baseCommits }])];
+      ...(contract.inputSnapshot === undefined ? [] : [{ path: contractInputPath(contract.inputSnapshot), baseBranch: contract.baseBranch, baseCommits }]),
+      ...stepTrees];
     void worktrees.releaseEnded(targets).then((report) => {
       // What the release did is recorded. The contract's end line already said where kept work is; a tree kept for the
       // owner's decision (uncommitted changes) is told once more, with its next steps, at the next start of a terminal app.
@@ -622,7 +629,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       }
       // A worktree-mode contract's tree has nothing left to do now that its work drained. The retention rules
       // remove it only when it holds nothing unique (no uncommitted changes, no commits missing from the base).
-      if (checkpointed && !disposed && run.contract.worktreePath !== undefined) releaseEndedWorktree(run.contract);
+      if (checkpointed && !disposed && run.contract.worktreePath !== undefined) releaseEndedWorktree(run);
       entry.resolve();
       settlements.delete(run.id);
       settling.delete(run.id);

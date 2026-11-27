@@ -46,7 +46,7 @@
 
 import type { ExecSandboxPlan } from './sandbox.js';
 import type { Containment } from '../../runtime/sandbox/contained-spawn.js';
-import { turnInputParty, type TurnInputParty } from '../../security/turn-input-party.js';
+import { partyOfCall, type TurnInputParty } from '../../security/turn-input-party.js';
 
 /**
  * Whether a composition requires the exec boundary: the same posture every
@@ -94,7 +94,7 @@ export const TURN_EXEC_CONTAINMENT: ExecContainmentRequirement = {
  */
 export function containmentForTurn(
   requirement: ExecContainmentRequirement | null | undefined,
-  party: TurnInputParty = turnInputParty(),
+  party: TurnInputParty = partyOfCall(),
 ): ExecContainmentRequirement | null | undefined {
   if (party.party === 'owner') return requirement;
   return {
@@ -109,7 +109,7 @@ export function containmentForTurn(
  * command's private /tmp takes writes. With {@link containmentForTurn} requiring the boundary, "writes no file" holds
  * for its commands as it does for write and edit ({@link foreignInputWriteRefusal}).
  */
-export function turnWritesNoFile(party: TurnInputParty = turnInputParty()): boolean {
+export function turnWritesNoFile(party: TurnInputParty = partyOfCall()): boolean {
   return party.party !== 'owner';
 }
 
@@ -118,7 +118,7 @@ export function turnWritesNoFile(party: TurnInputParty = turnInputParty()): bool
  * owner's turn: the gate under their mode decides it). Such a turn writes no file outside a real sandbox, and the write
  * and edit tools have none: what it may change it proposes to the owner instead.
  */
-export function foreignInputWriteRefusal(tool: string, party: TurnInputParty = turnInputParty()): string | null {
+export function foreignInputWriteRefusal(tool: string, party: TurnInputParty = partyOfCall()): string | null {
   if (party.party === 'owner') return null;
   return `Tool '${tool}' was refused: this turn acts on someone else's input (${party.who}), and such a turn writes no `
     + 'file outside a real sandbox, whatever the mode. Say what you would change, and the owner can make the change themselves.';

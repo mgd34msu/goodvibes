@@ -24,6 +24,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { currentTurn, inputOriginIsOwnerDirect, type TurnContext } from './turn-boundary.js';
 import { isGuestSurfaceId, normalizeSurfaceId } from '../gate/surface-authority.js';
+import { isChannelSurfaceKind } from '../../events/surfaces.js';
 import type { ActorClass } from '@goodvibes/engine/daemon-api/http-policy';
 
 /** Whose input a turn is acting on. `who` names the other party for the refusal a person reads. */
@@ -161,6 +162,26 @@ export function partyOfRecordedCause(cause: RecordedCause | undefined): TurnInpu
   return Object.freeze({ party: 'other' as const, who, ...(typeof kept.madeFor === 'string' && kept.madeFor ? { madeFor: kept.madeFor } : {}) });
 }
 
+const ownerDirectedCall = new AsyncLocalStorage<true>();
+
+/**
+ * Runs the tool call `fn` as one the owner directed on its card: a change asked for on a channel (a guest's or a stranger's
+ * message) that the owner approved in person (permissions/manager.ts `ownerDirected`: "their approval is the authority the
+ * channel lacked"). Such a call runs as released: its command is not held to a read-only sandbox and its write is not refused
+ * for the turn's party. `directed` false runs `fn` as it is.
+ */
+export function runAsOwnerDirectedCall<T>(directed: boolean, fn: () => T): T {
+  return directed ? ownerDirectedCall.run(true, fn) : fn();
+}
+
+/**
+ * The party the command sandbox and the write and edit refusals read for one call: the turn's (`turnInputParty`), unless
+ * this call is one the owner approved on its card (`runAsOwnerDirectedCall`), which runs as the owner's own call.
+ */
+export function partyOfCall(): TurnInputParty {
+  return ownerDirectedCall.getStore() === true ? OWNER : turnInputParty();
+}
+
 /** Runs `fn` with no party marked: a turn it starts is read from its own scope, never from the caller's mark. */
 export function withoutInputMark<T>(fn: () => T): T {
   return marked.exit(fn);
@@ -196,7 +217,10 @@ export function turnInputParty(turn: TurnContext | undefined = currentTurn()): T
   const actor = turn.actor?.agentFor ?? turn.actor;
   if (actor) {
     if (!OWNER_ACTOR_CLASSES.has(actor.class)) return { party: 'other', who: `${actor.class} ${actor.id}` };
-    if (actor.via === 'channel') return ownersChannelTurn(turn) ? OWNER : { party: 'other', who: `a message on ${turn.surface ?? actor.id}` };
+    // A sender the channel authenticated as its owner (class `owner`; a stranger or guest is class `guest` and left above) is
+    // the user's own message: the user's turn, as released, in any conversation of a channel they set up. What it asks to
+    // change is put to the user as a channel request (gate/classify.ts), not refused.
+    if (actor.via === 'channel') return OWNER;
   }
   // A piece of work's turn is no exception by its source: the work's own record says whose it is (work-plans.ts
   // `WorkCause`), and its runner marks the turn with that party (withOwnerInput / withOtherPartyInput).
@@ -208,7 +232,10 @@ export function turnInputParty(turn: TurnContext | undefined = currentTurn()): T
   const normalized = normalizeSurfaceId(surface);
   if (isGuestSurfaceId(normalized)) return { party: 'other', who: `a guest on ${normalized.slice('guest:'.length)}` };
   if (OWNER_SURFACES.has(normalized)) return OWNER;
-  // The owner's own message on a channel that proves its sender, in a conversation proven theirs alone.
-  if (ownersChannelTurn(turn)) return OWNER;
+  // A message on a channel the user set up that no guest turn marked (a stranger's or a guest's message always runs as a
+  // guest's, `withGuestTurn`, and a post that names no person is that channel as a stranger) is the user's own, as
+  // released; what it asks to change is put to the user on a card (gate/classify.ts), not refused. The proof of a
+  // one-to-one conversation (`ownersChannelTurn`) is what a turn named by its session alone needs.
+  if (isChannelSurfaceKind(normalized) || ownersChannelTurn(turn)) return OWNER;
   return { party: 'other', who: normalized === 'service' ? 'input an outside caller sent' : `a message on ${normalized}` };
 }

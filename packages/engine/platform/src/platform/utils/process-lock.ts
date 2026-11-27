@@ -17,6 +17,7 @@
  * the lock.
  */
 import { closeSync, mkdirSync, openSync, statSync } from 'node:fs';
+import { assertProjectFolderReachable } from '../workspace/project-folder-guard.js';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import type { Database } from 'bun:sqlite';
@@ -146,6 +147,7 @@ function lockFileFor(key: string): LockFile {
     forget(key, cached);
   }
   if (!current) {
+    assertProjectFolderReachable(key);
     mkdirSync(dirname(key), { recursive: true, mode: 0o700 });
     // Created here only so it is private. The file is new, so no connection of
     // this process has it open and this close cannot drop a lock it holds.

@@ -6,7 +6,6 @@ type ModalRoute =
   | 'handleBookmarkModalToken'
   | 'handleMcpWorkspaceToken'
   | 'handleSessionPickerToken'
-  | 'handleProfilePickerToken'
   | 'handleModelPickerToken'
   | 'handleEscapeOnlyModalToken'
   | 'handleFilePickerToken'
@@ -21,7 +20,6 @@ const MODAL_ROUTES: Readonly<Partial<Record<string, ModalRoute>>> = {
   liveTail: 'live-tail',
   mcpWorkspace: 'handleMcpWorkspaceToken',
   sessionPicker: 'handleSessionPickerToken',
-  profilePicker: 'handleProfilePickerToken',
   config: 'config',
   contextInspector: 'handleEscapeOnlyModalToken',
   process: 'process',
@@ -52,7 +50,6 @@ export type CommonModalRoutingState = ModalTokenSnapshot &
         | 'openProviderModelPickerWithTarget'
         | 'mcpWorkspace'
         | 'sessionPickerModal'
-        | 'profilePickerModal'
         | 'historySearch'
         | 'modelPicker'
         | 'onModelPickerCommit'
@@ -122,15 +119,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
     handleSessionPickerToken: (
       value: {
         sessionPickerModal: State['sessionPickerModal'];
-        commandContext: State['commandContext'];
-        requestRender: State['requestRender'];
-        handleEscape: State['handleEscape'];
-      },
-      arg1: InputToken,
-    ) => boolean;
-    handleProfilePickerToken: (
-      value: {
-        profilePickerModal: State['profilePickerModal'];
         commandContext: State['commandContext'];
         requestRender: State['requestRender'];
         handleEscape: State['handleEscape'];
@@ -273,21 +261,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
       return withState(state, true);
     }
   }
-  function handleProfilePickerToken(state: State, token: InputToken): ModalTokenResult | undefined {
-    if (
-      bindings.handleProfilePickerToken(
-        {
-          profilePickerModal: state.profilePickerModal,
-          commandContext: state.commandContext,
-          requestRender: state.requestRender,
-          handleEscape: state.handleEscape,
-        },
-        token,
-      )
-    ) {
-      return withState(state, true);
-    }
-  }
   function handleHistorySearchToken(state: State, token: InputToken): ModalTokenResult | undefined {
     const historyState = {
       historySearch: state.historySearch,
@@ -374,7 +347,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
     handleBookmarkModalToken,
     handleMcpWorkspaceToken,
     handleSessionPickerToken,
-    handleProfilePickerToken,
     handleModelPickerToken,
     handleEscapeOnlyModalToken,
     handleFilePickerToken,

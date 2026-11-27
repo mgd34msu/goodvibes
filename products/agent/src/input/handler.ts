@@ -44,7 +44,6 @@ import { SurfaceModalHost, type TrackedModal } from '@goodvibes/engine/terminal-
 import { BookmarkModal } from './bookmark-modal.ts';
 import { McpWorkspace } from './mcp-workspace.ts';
 import { SessionPickerModal } from './session-picker-modal.ts';
-import { ProfilePickerModal } from './profile-picker-modal.ts';
 import {
   cleanupMarkerRegistry,
   expandPrompt,
@@ -147,7 +146,6 @@ export class InputHandler extends TerminalInputHandlerState {
   public onFooterTarget: ((target: FooterTarget) => void) | null = null;
 
   public sessionPickerModal: SessionPickerModal;
-  public profilePickerModal: ProfilePickerModal;
   /** True when the help overlay is visible. */
 
   public filePicker: FilePickerModal;
@@ -161,8 +159,7 @@ export class InputHandler extends TerminalInputHandlerState {
       this.concealedInput !== null ||
       this.plainLineInput !== null ||
       this.surfaceModals.waitingForOwner ||
-      (this.sessionPickerModal.active && this.sessionPickerModal.deleteConfirmationTarget !== null) ||
-      (this.profilePickerModal.active && this.profilePickerModal.deleteConfirmationTarget !== null)
+      (this.sessionPickerModal.active && this.sessionPickerModal.deleteConfirmationTarget !== null)
     );
   }
   /** Time of last [COPIED] block feedback, for brief display. */
@@ -207,7 +204,6 @@ export class InputHandler extends TerminalInputHandlerState {
     });
     this.bookmarkModal = new BookmarkModal(uiServices.shell.bookmarkManager);
     this.sessionPickerModal = new SessionPickerModal(uiServices.sessions.sessionManager);
-    this.profilePickerModal = new ProfilePickerModal(uiServices.shell.profileManager);
     this.selectionQueue = attachSelectionModalQueue(this);
     this.modals = {
       ...createHandlerModals(this, { clearCommandText: true }),
@@ -221,7 +217,6 @@ export class InputHandler extends TerminalInputHandlerState {
       modals.process,
       modals.liveTail,
       modals.sessionPicker,
-      modals.profilePicker,
       modals.bookmark,
       modals.contextInspector,
       modals.modelPicker,

@@ -2783,11 +2783,6 @@
       "types": "./terminal-shell/dist/command-registry.d.ts",
       "import": "./terminal-shell/dist/command-registry.js"
     },
-    "./terminal-shell/renderer/profile-picker-modal": {
-      "bun": "./terminal-shell/src/renderer/profile-picker-modal.ts",
-      "types": "./terminal-shell/dist/renderer/profile-picker-modal.d.ts",
-      "import": "./terminal-shell/dist/renderer/profile-picker-modal.js"
-    },
     "./terminal-shell/renderer/search-overlay": {
       "bun": "./terminal-shell/src/renderer/search-overlay.ts",
       "types": "./terminal-shell/dist/renderer/search-overlay.d.ts",
@@ -2852,11 +2847,6 @@
       "bun": "./terminal-shell/src/notice-publication.ts",
       "types": "./terminal-shell/dist/notice-publication.d.ts",
       "import": "./terminal-shell/dist/notice-publication.js"
-    },
-    "./terminal-shell/profile-picker-state": {
-      "bun": "./terminal-shell/src/profile-picker-state.ts",
-      "types": "./terminal-shell/dist/profile-picker-state.d.ts",
-      "import": "./terminal-shell/dist/profile-picker-state.js"
     },
     "./terminal-shell/onboarding-data-types": {
       "bun": "./terminal-shell/src/onboarding-data-types.ts",

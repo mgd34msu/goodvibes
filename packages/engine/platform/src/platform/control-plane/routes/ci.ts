@@ -110,9 +110,13 @@ function createCreateHandler(service: CiWatchGatewayService): GatewayMethodHandl
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const target = targetOf(params);
+    // The watch belongs to the project the call was made in (its repair works there), as the other project-scoped handlers read it.
+    const called = invocation.context?.call?.project;
+    const project = optionalString(called) ?? optionalString(params['workingDirectory']);
     try {
       const watch = await service.createWatch({
         ...target,
+        ...(project !== undefined ? { project } : {}),
         deliveryChannel: requireString(params, 'deliveryChannel'),
         triggerFixSession: params.triggerFixSession === true,
       });

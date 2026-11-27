@@ -101,12 +101,11 @@ export const SETTINGS_KEPT_FOR_ROLLBACK: readonly string[] = [
 ];
 
 /**
- * The `judgment.policy` values 3.5.0 and earlier stored for "no decision model is
- * used" (`Classic - Off` is its 3.2.0 name). This release does not have it: a
- * home that holds one is carried once to the mode Ask me with no decision model
- * set (ConfigManager, decision models off), so nothing is sent to one.
+ * The `judgment.policy` values that are carried to the mode Ask me with no decision model set (ConfigManager, decision
+ * models off). None: `No Decision Model` is a value of that setting as released in 3.5.0 and stays one, with the meaning it
+ * had (no decision model is asked), so a stored value is read as it was written and nothing is carried.
  */
-export const RETIRED_NO_DECISION_MODEL_POLICIES: readonly string[] = ['No Decision Model', 'Classic - Off'];
+export const RETIRED_NO_DECISION_MODEL_POLICIES: readonly string[] = [];
 
 /**
  * The decision-model settings a home carried from No Decision Model has moved

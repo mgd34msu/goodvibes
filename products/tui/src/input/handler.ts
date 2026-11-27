@@ -66,7 +66,6 @@ import { BookmarkModal } from './bookmark-modal.ts';
 import { McpWorkspace } from './mcp-workspace.ts';
 import { SessionPickerModal, getSharedHostedSessionRoster } from './session-picker-modal.ts';
 import { ConfigModal } from './config-modal.ts';
-import { ProfilePickerModal } from '@goodvibes/engine/terminal-shell/profile-picker-state';
 import { OnboardingWizardController, type OnboardingFormOutcome, type OnboardingWizardAction, type OnboardingWizardMode } from './onboarding/onboarding-wizard.ts';
 import type { OnboardingApplyRequest, OnboardingVerificationItem } from '../runtime/onboarding/index.ts';
 import { handleClipboardPaste, type ClipboardPasteSource } from './handler-content-actions.ts';
@@ -143,7 +142,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
   public onboardingOpenAiListener: Awaited<ReturnType<typeof createOAuthLocalListener>> | null = null;
 
   public sessionPickerModal: SessionPickerModal;
-  public profilePickerModal: ProfilePickerModal;
 
   public filePicker: FilePickerModal;
 
@@ -155,8 +153,7 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
       (this.selectionModal.active && this.selectionCallback !== null) ||
       this.surfaceModals.waitingForOwner ||
       (this.configModal.active && this.configModal.hasPendingConfirm()) ||
-      (this.sessionPickerModal.active && this.sessionPickerModal.deleteConfirmationTarget !== null) ||
-      (this.profilePickerModal.active && this.profilePickerModal.deleteConfirmationTarget !== null)
+      (this.sessionPickerModal.active && this.sessionPickerModal.deleteConfirmationTarget !== null)
     );
   }
   /** FIFO queue for overlapping openSelection() calls, see selection-modal-queue.ts. */
@@ -205,7 +202,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
       () => this.requestRender(),
       () => this.commandContext?.session.runtime.sessionId,
     ); // third source: the daemon-hosted roster
-    this.profilePickerModal = new ProfilePickerModal(uiServices.shell.profileManager);
     this.selectionQueue = attachSelectionModalQueue(this); // wires exitApp teardown too, see selection-modal-queue.ts
     this.modals = {
       ...createHandlerModals(this, {
@@ -228,7 +224,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
       modals.config,
       modals.mcpWorkspace,
       modals.sessionPicker,
-      modals.profilePicker,
       modals.bookmark,
       modals.contextInspector,
       modals.modelPicker,

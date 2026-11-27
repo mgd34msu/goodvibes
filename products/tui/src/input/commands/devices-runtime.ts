@@ -137,7 +137,8 @@ export const TUI_PAIRING: DevicesPairingHost<CommandContext> = {
     const notice = pairingPostureNotice(info.posture);
     return {
       text: [
-        `A pairing offer named "${info.tokenName}" was made for ${info.url}; the device is listed by that name once it pairs.`,
+        // No bare "device" in these words: a place reads that picked value ("device") as its label, and the line then says it twice.
+        `A pairing offer was made for ${info.url}; it is listed under ${name ? `the name "${name}"` : 'a dated name'} once a phone or tablet pairs with it.`,
         ...(here ?? ['Scan its QR code with the phone\'s camera: it opens the web app already signed in.']),
         ...(info.offers.length > 0 ? ['', 'Offers carried in this pairing (each declinable in the web app):', ...formatPairingOffers(info.offers)] : []),
         ...(notice ? ['', notice] : []),

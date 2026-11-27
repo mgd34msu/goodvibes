@@ -6,7 +6,6 @@ interface CommonUiInput<Context> {
   openSelection: OpenSelection;
   readonly contextInspectorModal: CommonModal;
   readonly bookmarkModal: CommonModal;
-  readonly profilePickerModal: CommonModal;
   readonly sessionPickerModal: CommonModal;
   indicatorFocused: boolean;
   openMcpWorkspace(context: Context): unknown;
@@ -26,7 +25,6 @@ export function createCommonShellUiOpeners<Context>(options: {
     openSelection: ((title, items, opts, callback) => input.openSelection(title, items, opts, callback)) as OpenSelection,
     openContextInspector: () => open(input.contextInspectorModal),
     openBookmarkModal: () => open(input.bookmarkModal),
-    openProfilePicker: () => open(input.profilePickerModal),
     openSessionPicker: () => open(input.sessionPickerModal),
     openMcpWorkspace: () => {
       input.openMcpWorkspace(commandContext);

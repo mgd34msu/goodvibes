@@ -91,11 +91,11 @@ export const DEVICES_PAIR: CapabilityDefinition<DevicesSessionServices> = {
       if (said !== null && typeof said === 'object') return { text: said.text || otherwise, ...(said.reveal ? { reveal: said.reveal } : {}) };
       return { text: said || otherwise };
     };
-    if (values.what === 'device') return answered(await pairing.pairDevice(name), 'A pairing offer was made for a phone or another device.');
+    if (values.what === 'device') return answered(await pairing.pairDevice(name), 'A pairing offer was made.');
     if (values.what === 'host') {
       return answered(await piece(pairing, 'pairHost', 'Pairing this program with its daemon')({ name, code: values.code?.trim() ?? '' }), 'This program is paired with its daemon.');
     }
-    if (values.what === 'relay') return answered(await piece(pairing, 'pairRelay', 'Pairing a device through the relay')(name), 'A pairing code was made for a device through the relay.');
+    if (values.what === 'relay') return answered(await piece(pairing, 'pairRelay', 'Pairing a device through the relay')(name), 'A pairing code was made through the relay.');
     if (!values.channel) throw new CapabilityRefusal('Name the channel to pair.', 'Choose the channel under Channel.');
     return answered(await piece(pairing, 'pairChannel', 'Setting up a channel')(values.channel), `Opened the row of ${values.channel} in Mail, calendar and channels, where its keys are entered.`);
   },

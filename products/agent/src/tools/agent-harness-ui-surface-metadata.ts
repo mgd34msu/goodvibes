@@ -390,16 +390,6 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     open: (context) => openSimpleContextSurface(context, 'session-picker', 'openSessionPicker'),
   },
   {
-    id: 'profile-picker',
-    label: 'Profile Picker',
-    kind: 'picker',
-    summary: 'Agent profile picker for local isolated profile selection.',
-    command: 'Memory and knowledge, Agent homes tab (the menu)',
-    preferredModelRoute: 'Use capability_run with the agent-home capabilities (agent-home.list, agent-home.create, agent-home.use, ...) for concrete operations.',
-    available: (context) => typeof context.openProfilePicker === 'function',
-    open: (context) => openSimpleContextSurface(context, 'profile-picker', 'openProfilePicker'),
-  },
-  {
     id: 'bookmark-modal',
     label: 'Bookmarks',
     kind: 'modal',
@@ -668,7 +658,7 @@ function uiSurfaceModelRoute(surface: UiSurfaceDefinition): string {
 
 const UI_CALLBACK_NAMES = ['openPlaceMenu', 'openPlace', 'openSettingsModal', 'openMcpWorkspace', 'openModelPicker', 'openModelPickerWithTarget',
   'openProviderPicker', 'openProviderModelPickerWithTarget', 'openReasoningEffortPicker', 'openSelection', 'openSessionPicker',
-  'openProfilePicker', 'openBookmarkModal', 'openContextInspector', 'openProcessModal', 'openLiveTail', 'openConversationSearch',
+  'openBookmarkModal', 'openContextInspector', 'openProcessModal', 'openLiveTail', 'openConversationSearch',
   'openPromptHistorySearch', 'openSlashCommandMode', 'executeCommand', 'openFilePicker', 'openBlockActions', 'openCommandPalette',
   'print', 'renderRequest'] as const;
 

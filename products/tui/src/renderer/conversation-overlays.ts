@@ -18,7 +18,6 @@ import { renderContextInspector } from './context-inspector.ts';
 import { renderConfigModal } from './config-modal.ts';
 import { renderMcpWorkspace } from './mcp-workspace.ts';
 import { renderSessionPickerModal } from './session-picker-modal.ts';
-import { renderProfilePickerModal } from './profile-picker-modal.ts';
 import { renderBookmarkModal } from './bookmark-modal.ts';
 import { renderBlockActionsMenu } from './block-actions-overlay.ts';
 import { renderAutocompleteOverlay } from './autocomplete-overlay.ts';
@@ -118,7 +117,6 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
     ['mcpWorkspace', input.mcpWorkspace.active, () => renderMcpWorkspace(input.mcpWorkspace, w, h)],
     ['config', !onboarding && input.configModal.active, () => renderConfigModal(input.configModal, w, h)],
     ['sessionPicker', !onboarding && input.sessionPickerModal.active, () => renderSessionPickerModal(input.sessionPickerModal, w, h)],
-    ['profilePicker', !onboarding && input.profilePickerModal.active, () => renderProfilePickerModal(input.profilePickerModal, w, h)],
     ['bookmark', !onboarding && input.bookmarkModal.active, () => renderBookmarkModal(input.bookmarkModal, w, h)],
     ['blockActions', !onboarding && input.blockActionsMenu.active, () => renderBlockActionsMenu(input.blockActionsMenu, w, h)],
     [

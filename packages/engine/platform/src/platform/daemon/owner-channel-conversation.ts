@@ -1,17 +1,16 @@
 /**
  * owner-channel-conversation.ts, whether one channel turn is the owner's own message.
  *
- * As released (v3.5.0), the owner's own message on a channel they set up is the owner's turn; a change it asks for is
- * put to the owner as a channel request (gate/classify.ts `channel-request`: one call, nothing remembered; held in Just
- * vibes; refused in plan; asked in YOLO too). The owner's own message is one whose sender the channel itself
- * authenticates (channels/own-messages-proof.ts: never ntfy, a webhook, a phone number, WhatsApp or a bridged iMessage)
- * as the channel's owner, in a conversation proven to be the owner's alone: the channel's owner in a one-to-one
- * conversation with the assistant (owner-alert.ts `isOwnerConversation`, the same proof an owner alert and an approval
- * answer rest on), never a group, a shared channel or a thread. Home Assistant the same: its conversation is the owner's
- * alone only when it came with Home Assistant's user id of the channel's owner and is direct (a voice pipeline that names
- * no user is never the owner's alone). Any other message on a channel is someone else's input (security/turn-input-party.ts).
+ * As released (v3.5.0), the owner's own message on a channel they set up is the owner's turn, in any conversation of that
+ * channel (security/turn-input-party.ts `turnInputParty`: a stranger's or a guest's message always runs as a guest's); a
+ * change it asks for is put to the owner as a channel request (gate/classify.ts `channel-request`: one call, nothing
+ * remembered; held in Just vibes; refused in plan; asked in YOLO too).
  *
- * Read from the turn's session and that session's channel route, never from a message's words.
+ * What this file answers is the narrower question a turn named by its session alone asks (a piece of work or an automatic
+ * project a channel conversation caused): whether the whole session is the channel owner's own one-to-one conversation
+ * (channels/own-messages-proof.ts: never ntfy, a webhook, a phone number, WhatsApp or a bridged iMessage; owner-alert.ts
+ * `isOwnerConversation`), never a group, a shared channel or a thread. Read from the session and its channel route, never
+ * from a message's words.
  */
 import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { ChannelPolicyRecord, ChannelSurface } from '../channels/types.js';

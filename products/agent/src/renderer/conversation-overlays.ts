@@ -19,7 +19,6 @@ import { renderLiveTailModal } from './live-tail-modal.ts';
 import { renderContextInspector } from './context-inspector.ts';
 import { renderMcpWorkspace } from './mcp-workspace.ts';
 import { renderSessionPickerModal } from './session-picker-modal.ts';
-import { renderProfilePickerModal } from './profile-picker-modal.ts';
 import { renderBookmarkModal } from './bookmark-modal.ts';
 import { renderAutocompleteOverlay } from './autocomplete-overlay.ts';
 import { renderBlockActionsMenu } from './block-actions-overlay.ts';
@@ -96,7 +95,6 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
     ['modelPicker', input.modelPicker.active, () => renderModelWorkspace(input.modelPicker, w, h)],
     ['mcpWorkspace', input.mcpWorkspace.active, () => renderMcpWorkspace(input.mcpWorkspace, w, h)],
     ['sessionPicker', input.sessionPickerModal.active, () => renderSessionPickerModal(input.sessionPickerModal, w, h)],
-    ['profilePicker', input.profilePickerModal.active, () => renderProfilePickerModal(input.profilePickerModal, w, h)],
     ['bookmark', input.bookmarkModal.active, () => renderBookmarkModal(input.bookmarkModal, w, h)],
     [
       'contextInspector',

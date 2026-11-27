@@ -16,6 +16,7 @@
  * release; a file left by a holder that died is replaced by the next one.
  */
 import { closeSync, existsSync, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
+import { assertProjectFolderReachable } from '../project-folder-guard.js';
 import { randomBytes } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { logger } from '../../utils/logger.js';
@@ -149,6 +150,7 @@ export function assertCrossProcessLockCurrent(release: () => void): void {
 export function tryAcquireCrossProcessLock(lockPath: string, options: { readonly assertCurrent?: (() => void) | undefined } = {}): (() => void) | null {
   const assertCurrent = options.assertCurrent?.bind(options);
   assertCurrent?.();
+  assertProjectFolderReachable(lockPath);
   mkdirSync(dirname(lockPath), { recursive: true });
   const held = holdProcessLock(kernelLockPath(lockPath));
   if (!held) return null;
@@ -192,6 +194,7 @@ export function clearAbandonedCrossProcessLock(lockPath: string): 'held' | 'remo
  * runs out throws {@link CrossProcessLockBusyError} naming the holder.
  */
 export async function acquireCrossProcessLock(lockPath: string, options: CrossProcessLockOptions = {}): Promise<() => void> {
+  assertProjectFolderReachable(lockPath);
   mkdirSync(dirname(lockPath), { recursive: true });
   let held: HeldProcessLock;
   try {
@@ -213,6 +216,7 @@ export async function acquireCrossProcessLock(lockPath: string, options: CrossPr
  * always at once.
  */
 export function withCrossProcessLockSync<T>(lockPath: string, write: () => T, options: { readonly waitMs?: number | undefined } = {}): T {
+  assertProjectFolderReachable(lockPath);
   mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 });
   try {
     return withProcessLockSync(kernelLockPath(lockPath), () => {

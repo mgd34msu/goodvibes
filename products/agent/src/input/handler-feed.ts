@@ -28,7 +28,6 @@ import type { SurfaceModalHost } from '@goodvibes/engine/terminal-shell/surface-
 import { BookmarkModal } from './bookmark-modal.ts';
 import type { McpWorkspace } from './mcp-workspace.ts';
 import { SessionPickerModal } from './session-picker-modal.ts';
-import { ProfilePickerModal } from './profile-picker-modal.ts';
 import { handleIndicatorFocusToken, handleMouseToken, handlePromptKeyToken, handlePromptTextToken } from './handler-feed-routes.ts';
 import type { WrappedPromptInfo } from './handler-prompt-buffer.ts';
 import { handleWorkTreeToken } from './handler-work-tree-route.ts';
@@ -77,7 +76,7 @@ import type { FocusTracker } from '@/runtime/index.ts';
  *     main.ts). Shared instance from RuntimeServices, threaded via
  *     uiServices.platform.focusTracker (mirrors the TUI's own wiring).
  *   - `selectionModal`, `bookmarkModal`, `sessionPickerModal`,
- *     `profilePickerModal`, modal objects constructed once in InputHandler constructor
+ *     modal objects constructed once in InputHandler constructor
  *   - `filePicker`, `modelPicker`, `processModal`, `liveTailModal`,
  *     `contextInspectorModal`, `blockActionsMenu`, `searchManager`, `historySearch`,
  *     service objects constructed once
@@ -115,7 +114,6 @@ export interface InputFeedContext {
   readonly bookmarkModal: BookmarkModal;
   readonly mcpWorkspace: McpWorkspace;
   readonly sessionPickerModal: SessionPickerModal;
-  readonly profilePickerModal: ProfilePickerModal;
   readonly historySearch: HistorySearch;
   commandRegistry: CommandRegistry | null;
   commandContext: CommandContext | undefined;

@@ -122,7 +122,9 @@ export async function assessWorktree(path: string, rootDir: string, baseBranch?:
   if (!status.ok) return { kind: 'unreadable', reason: 'git status failed' };
   const lines = status.out.length > 0 ? status.out.split('\n') : [];
   const ignoredEntries = lines.filter((line) => line.startsWith('!! ')).map((line) => line.slice(3));
-  const changes = lines.length - ignoredEntries.length;
+  // The product's own bookkeeping at the tree's root (a step's verification log) is no change of the person's, ignored or not.
+  const ownState = lines.filter((line) => line.startsWith('?? ') && line.slice(3).startsWith(PRODUCT_STATE_DIR)).length;
+  const changes = lines.length - ignoredEntries.length - ownState;
   const ignored = ignoredEntries.filter((entry) => !regenerableIgnoredEntry(entry, path, rootDir)).length;
   if (changes > 0) return { kind: 'uncommitted', changes, ignored };
 

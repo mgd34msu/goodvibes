@@ -21,7 +21,6 @@ export interface HandlerModalOwner {
         reopen(): void;
     };
     readonly sessionPickerModal: OwnModal;
-    readonly profilePickerModal: OwnModal;
     readonly bookmarkModal: OwnModal & {
         open(): void;
     };
@@ -78,7 +77,6 @@ export function createHandlerModals(owner: HandlerModalOwner, options: {
         // The settings screen is a kit modal of its own (settings-screen/screen.ts), pushed by the places.
         mcpWorkspace: ownModal('mcpWorkspace', () => owner.mcpWorkspace, () => owner.mcpWorkspace.reopen()),
         sessionPicker: ownModal('sessionPicker', () => owner.sessionPickerModal),
-        profilePicker: ownModal('profilePicker', () => owner.profilePickerModal),
         bookmark: ownModal('bookmark', () => owner.bookmarkModal, () => owner.bookmarkModal.open()),
         contextInspector: ownModal('contextInspector', () => owner.contextInspectorModal, () => owner.contextInspectorModal.open()),
         modelPicker: {

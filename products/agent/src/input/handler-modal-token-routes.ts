@@ -4,7 +4,6 @@ import type { ConversationManager } from '../core/conversation.ts';
 import type { SelectionResult, SelectionModal } from './selection-modal.ts';
 import type { BookmarkModal } from './bookmark-modal.ts';
 import type { SessionPickerModal } from './session-picker-modal.ts';
-import type { ProfilePickerModal } from './profile-picker-modal.ts';
 import type { HistorySearch } from './input-history.ts';
 import type { ModelPickerModal } from './model-picker.ts';
 import { handleMcpWorkspaceToken, type McpWorkspace } from './mcp-workspace.ts';
@@ -19,7 +18,6 @@ import type { SurfaceModalHost } from '@goodvibes/engine/terminal-shell/surface-
 import { handleHistorySearchToken, handleSearchModeToken } from './handler-ui-state.ts';
 import {
   handleBookmarkModalToken,
-  handleProfilePickerToken,
   handleSelectionModalToken,
   handleSessionPickerToken,
 } from './handler-modal-routes.ts';
@@ -42,7 +40,6 @@ export type ModalTokenRouteState = {
   bookmarkModal: BookmarkModal;
   mcpWorkspace: McpWorkspace;
   sessionPickerModal: SessionPickerModal;
-  profilePickerModal: ProfilePickerModal;
   historySearch: HistorySearch;
   prompt: string;
   cursorPos: number;
@@ -86,7 +83,6 @@ export const handleModalTokenRoutes = createModalTokenPipeline<ModalTokenRouteSt
     handleBookmarkModalToken,
     handleMcpWorkspaceToken,
     handleSessionPickerToken,
-    handleProfilePickerToken,
     handleHistorySearchToken,
     handleModelPickerToken,
     handleEscapeOnlyModalToken,

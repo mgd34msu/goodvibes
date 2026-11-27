@@ -36,6 +36,7 @@ const PROVIDERS = [
 const POLICY_DETAILS: Readonly<Record<string, string>> = {
   Hybrid: 'While the decision model fails, a call it would read or decide is decided as Ask me decides it, asking you where Ask me asks (in Just vibes it is held to the end of the run). The failure is shown once with the model, what failed and the next step.',
   'Decision Model Only': 'While the decision model fails, a call it would read or decide is refused with the reason, in every mode, and the turn goes on.',
+  'No Decision Model': 'No decision model is asked, as with none set: every decision takes its fallback (a permission call comes to you, or is held in Just vibes). Ordinary chat and tools remain available with the chosen execution permissions.',
   'ask-me': 'With a working decision model, ordinary work runs automatically and dangerous actions and owner-only decisions ask you; without one, every action asks you except a read inside the workspace and a change to files inside it that can be undone.',
   'jev-decides': 'A decision model decides every action the permission rules do not settle, critical ones included; owner-only decisions ask you. With no working decision model it behaves as Ask me.',
   'just-vibes': 'Does as much as it can without interrupting you; anything that needs you is held and listed at the end.',

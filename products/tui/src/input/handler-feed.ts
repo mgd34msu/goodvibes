@@ -28,7 +28,6 @@ import { BookmarkModal } from './bookmark-modal.ts';
 import type { McpWorkspace } from './mcp-workspace.ts';
 import { SessionPickerModal } from './session-picker-modal.ts';
 import type { ConfigModal } from './config-modal.ts';
-import { ProfilePickerModal } from '@goodvibes/engine/terminal-shell/profile-picker-state';
 import type { OnboardingWizardController } from './onboarding/onboarding-wizard.ts';
 import type { OnboardingWizardAction } from './onboarding/onboarding-wizard.ts';
 import { handleIndicatorFocusToken, handleMouseToken, handlePromptKeyToken, handlePromptTextToken } from './handler-feed-routes.ts';
@@ -71,7 +70,7 @@ import { guardCommandPaste, type PasteBurstGuardState } from '@goodvibes/engine/
  *     feed() entry only since no in-feed action rewires them
  *   - `pasteRegistry`, `imageRegistry`, owned Maps, never replaced
  *   - `selectionModal`, `bookmarkModal`, `sessionPickerModal`,
- *     `profilePickerModal`, modal objects constructed once in InputHandler constructor
+ *     modal objects constructed once in InputHandler constructor
  *   - `filePicker`, `modelPicker`, `onboardingWizard`,
  *     `contextInspectorModal`, `blockActionsMenu`, `searchManager`, `historySearch`,
  *     service objects constructed once
@@ -107,7 +106,6 @@ export interface InputFeedContext {
   readonly bookmarkModal: BookmarkModal;
   readonly mcpWorkspace: McpWorkspace;
   readonly sessionPickerModal: SessionPickerModal;
-  readonly profilePickerModal: ProfilePickerModal;
   readonly configModal: ConfigModal;
   readonly historySearch: HistorySearch;
   commandRegistry: CommandRegistry | null;

@@ -96,7 +96,6 @@ export interface TerminalCommandShellUiOpeners<Target extends ModelPickerTarget>
    */
   openWhoDecides?: (options?: { readonly always?: boolean | undefined }) => Promise<boolean>;
   openSessionPicker?: () => void;
-  openProfilePicker?: () => void;
   getScrollTop?: () => number;
   openSessionView?: (target: { readonly kind: 'agent' | 'process'; readonly id: string }) => boolean;
   openNotifications?: () => void;

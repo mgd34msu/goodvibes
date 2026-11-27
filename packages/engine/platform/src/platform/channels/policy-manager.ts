@@ -118,11 +118,11 @@ export interface ChannelDelegatedReviewSource {
  * The actor a sender on a channel is (actor.ts): the channel's owner, or a
  * guest. What either may cause is decided by the effect table
  * (`admitEffects`), never by testing the owner again at the call site. A
- * sender with no identity is a guest (the generic webhook, Home Assistant
- * naming no user): a surface's secret proves the surface, not the person; a
- * chat adapter always passes the sender it can identify (a Telegram channel
- * post is its `sender_chat`). A caller that needs to know who pressed or wrote
- * refuses an anonymous sender before it asks.
+ * sender with no identity acts as the owner, which holds only for a surface
+ * whose secret the owner's own systems hold (the generic webhook, Home
+ * Assistant), as released; a chat adapter always passes the sender it can
+ * identify (a Telegram channel post is its `sender_chat`). A caller that needs
+ * to know who pressed or wrote refuses an anonymous sender before it asks.
  */
 export function channelSenderActor(decision: { readonly policy: Pick<ChannelPolicyRecord, 'ownerId'> }, surface: string, userId: string | undefined): Actor {
   return actorFromChannelSender({ surface, userId, isChannelOwner: isChannelOwner(decision, userId) });

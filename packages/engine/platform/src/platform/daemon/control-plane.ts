@@ -61,14 +61,12 @@ import { decidedMarkAct, decidedMarkCovers, ownerApprovalCovers, spendCapability
 const SETTING_WRITE_METHOD_IDS: ReadonlySet<string> = new Set(['config.set', 'config.setMany', 'config.reset', 'credentials.set', 'credentials.delete']);
 import { methodCallRisk, OWNER_ONLY_WHERE, ownerOnlyMethodArea, riskOfDescriptor, VALUE_DECIDED_METHOD_IDS, type MethodRisk } from '../control-plane/method-risk.js';
 import { modelNeverMakes } from '../security/effect-authority.js';
-import { isCommandLineRegistration, isRegisteredProgram } from './program-registrations.js';
 import { AGENT_CREDENTIAL_OWNER_ONLY_WORDS, ANSWER_METHOD_IDS, callerAdmitted, methodCallPutToOwner, mintsAgentCredential, nestedAnswerAdmitted, OWNER_ANSWERS_ONLY, OWNER_ANSWERS_ONLY_WORDS, OWNER_DECISION_NEEDED, OWNER_DEVICE_ANSWER_METHOD_IDS, ownerAnswers, ownerHimself, ownersAgentProgram, ownersDevice, ownersOwnSession, ownersProgramCaller, partyOfCaller, wellFormedActor,
   makesOwnerOnlyAct, MODEL_NEVER, modelNeverWords, OWNER_ONLY_ACT, ownerOnlyActWords, ownersCommandLine } from './method-owner-decision.js';
 import { asCallOutsideTurn, turnInputParty } from '../security/turn-input-party.js';
 import { decideInProject } from '../permissions/call-project.js';
 import { withFirstUseCall, type FirstUseCall } from './capability-owner-gate.js';
-import { bindOwnerAdmitted, bindProgramRegistration, bindSettingAct, readProgramRegistration, type SettingAct } from '@goodvibes/engine/daemon-api/control-routes';
-import { isInProcessRequest } from './client-address.js';
+import { bindOwnerAdmitted, bindProgramRegistration, bindSettingAct, type SettingAct } from '@goodvibes/engine/daemon-api/control-routes';
 
 /** The `{param}` values of a path template in a path, decoded; undefined when the path does not fit the template. */
 function pathParamsOf(template: string, pathname: string): Record<string, string> | undefined {
@@ -92,15 +90,15 @@ const CAPABILITY_RUN_METHOD = 'capabilities.run';
 const CREDENTIAL_MINT_METHOD_IDS: ReadonlySet<string> = new Set(['pairing.tokens.create', 'pairing.tokens.migrate', 'pairing.outsideAgent.issue']);
 
 /**
- * Who makes a credential: the owner in person (their sign-in, their registered program, the daemon's own act), or the caller
- * it was put to the owner for, on the owner's yes (the owner's own device included: a device is never the owner in person); undefined for
- * anyone else (such a mint is held for the owner first). A yes gives that caller what its card said, never the owner's device.
+ * Who makes a credential: the user from any credential (their sign-in, a device, the operator token, a command line), or the
+ * caller it was put to the owner for, on the owner's yes; undefined for anyone else (such a mint is held for the owner
+ * first). A yes gives that caller what its card said.
  */
 function credentialMakerOf(authenticated: { readonly principalId: string; readonly credentialKind?: CredentialKind | null | undefined; readonly actor?: Actor | undefined } | null | undefined,
   caller: { readonly actor: Actor | undefined; readonly registration: string | undefined }, ownerApproved: boolean): { readonly owner: true } | { readonly caller: string; readonly ownersYes: true } | undefined {
   // The daemon's own in-process act is not the owner being there: it records no maker (never the owner's device).
   if (caller.actor?.class === 'system') return undefined;
-  // The owner in person or the owner's own command line (method-owner-decision.ts `makesOwnerOnlyAct`, the one test).
+  // The user from any credential (method-owner-decision.ts `makesOwnerOnlyAct`, the one test).
   if (authenticated && makesOwnerOnlyAct({ actor: authenticated.actor, credentialKind: authenticated.credentialKind ?? undefined, registration: caller.registration })) return { owner: true };
   if (ownerApproved) return { caller: authenticated?.principalId ?? 'a caller the daemon could not name', ownersYes: true };
   return undefined;
@@ -118,7 +116,6 @@ import { EngineErrorCodes, isRefusal, refusalErrorBody } from '@goodvibes/engine
 import { startsWork, type DaemonWorkAdmission } from './work-admission.js';
 import {
   actorFromPrincipal,
-  scriptActor,
   NO_OWNER_USER,
   type Actor,
   type AuthenticatedPrincipal,
@@ -568,36 +565,13 @@ export class DaemonControlPlaneHelper {
     return described ? this.asWhoCalls(req, described) : null;
   }
 
-  /** The credential's own actors, kept for a principal the request's caller was found a script for (`asWhoCalls`). */
-  readonly #credentialActors = new WeakMap<RequestPrincipal, Actor>();
-
   /**
-   * The request's context as WHO calls, never as the kind of credential: the operator token (`local`, `shared-token`)
-   * or the Agent's credential on a request that carries no registration the daemon issued to one of the owner's own
-   * programs it verified (bound by the router before any route reads the caller), and not served by the daemon to
-   * itself, is a script (`script` class). Read again whenever the request's registration is: the router reads the
-   * caller once before it checks the registration.
+   * The request's context as the credential established it. The operator token and the Agent's credential are the user's
+   * whether or not the request carries a program's registration, so no actor is derived from the registration any more
+   * (the `script` class is applied nowhere; daemon-api actor.ts `scriptActor`).
    */
-  private asWhoCalls(req: Request, context: RequestContext): RequestContext {
-    const principal = context.principal;
-    const kind = principal.credentialKind;
-    if (kind !== 'local' && kind !== 'shared-token' && kind !== 'agent') return context;
-    const script = readProgramRegistration(req) === undefined && !isInProcessRequest(req);
-    const own = this.#credentialActors.get(principal);
-    if (script === (principal.actor.class === 'script')) return context;
-    let next: RequestPrincipal;
-    if (script) {
-      next = Object.freeze({ ...principal, actor: scriptActor(principal.actor) });
-      this.#credentialActors.set(next, principal.actor);
-    } else {
-      if (own === undefined) return context;
-      next = Object.freeze({ ...principal, actor: own });
-    }
-    const gateway = this.context.controlPlaneGateway;
-    const rebuilt = createRequestContext(next, req.signal,
-      typeof gateway?.principalSignal === 'function' ? () => gateway.principalSignal(next.principalId) : undefined);
-    bindRequestContext(req, rebuilt);
-    return rebuilt;
+  private asWhoCalls(_req: Request, context: RequestContext): RequestContext {
+    return context;
   }
 
   private describeRequestContext(req: Request): RequestContext | null {
@@ -856,7 +830,7 @@ export class DaemonControlPlaneHelper {
    */
   private callActor(principal: { readonly principalId: string; readonly principalKind: AuthenticatedPrincipal['principalKind'] | 'remote-peer'; readonly credentialKind?: CredentialKind | null | undefined; readonly ownerDevice?: true | undefined; readonly admin: boolean; readonly scopes: readonly string[]; readonly actor?: Actor | undefined },
     admin: boolean, scopes: readonly string[]): Actor {
-    // The actor built when the credential was authenticated, unless the call's context narrowed it. A script stays one.
+    // The actor built when the credential was authenticated, unless the call's context narrowed it.
     if (principal.actor?.class === 'script') return principal.actor;
     if (principal.actor !== undefined && admin === principal.admin && scopes.length === principal.scopes.length) return principal.actor;
     return actorFromPrincipal({ ...principal, admin, scopes }, this.ownerIdentity());
@@ -1388,8 +1362,7 @@ export class DaemonControlPlaneHelper {
     upstream: SettingAct | undefined, ownerApproved: boolean, inPerson: boolean): SettingAct {
     const actor = context?.actor;
     const by = upstream?.by ?? context?.principalId ?? actor?.id ?? 'unknown';
-    // The owner in person (their signed-in session or their verified program: method-owner-decision.ts `ownerHimself`) or the
-    // owner's own verified command line (`ownersCommandLine`), never a credential's class alone: this record is what the
+    // The user from any credential (method-owner-decision.ts `ownerHimself`, `ownersCommandLine`): this record is what the
     // group's other machines read as the owner's own act (gate-review-6 G2).
     const owner = upstream?.owner ?? inPerson;
     const how = upstream?.how ?? (ownerApproved ? 'yes' : context?.explicitUserRequest === true && owner ? 'press' : 'rules');
@@ -1815,17 +1788,6 @@ export class DaemonControlPlaneHelper {
         ...(principal.credentialKind ? { credentialKind: principal.credentialKind } : {}),
         actor: this.callActor(principal, admin, scopes),
       };
-      // The operator token and the Agent's credential on a call with no registration of the owner's verified program
-      // (checked by the router), not one the daemon serves to itself or nests in its own turn: a script, whoever holds
-      // or minted it (`script` class; daemon-api actor.ts). Every door: a request, a socket's call, a nested call.
-      const ownKinds = principal.credentialKind === 'local' || principal.credentialKind === 'shared-token' || principal.credentialKind === 'agent';
-      // A verified command line (`cli`) is the owner's program for where it works, never a person (method-owner-decision.ts
-      // `ownersCommandLine`): its actor stays the owner's; it is not a script.
-      if (ownKinds && context.actor !== undefined && context.actor.class !== 'script' && !isRegisteredProgram(input.context?.call?.registration)
-        && !isCommandLineRegistration(input.context?.call?.registration)
-        && input.context?.call?.daemonHosted !== true && input.daemonTurn !== true) {
-        context = { ...context, actor: scriptActor(context.actor) };
-      }
     }
     // card.enter crosses only this machine, TLS or the tailnet: refused before any other check reads the body.
     if (descriptor.effects?.includes('card.enter') && !mayCrossWithCardDetails(authenticated?.transport)) {
@@ -1849,14 +1811,11 @@ export class DaemonControlPlaneHelper {
     // operator token from elsewhere, the Agent's credential for the calls it
     // makes on the owner's behalf, a bot, service or peer cannot, so their claim
     // is dropped before any handler reads it. A literal false stays: it only restricts.
-    // The operator token on this machine (`local`) is held by every command line and script here: its claim is kept
-    // only on a call carrying a registration the daemon issued to a process it verified is one of the product's own
-    // programs (daemon/program-registrations.ts, checked by the router for this very request); a bare `local` caller is
-    // a script, whatever it sends.
+    // The operator token on this machine (`local`) is the user's whichever process holds it, with or without a program's
+    // registration: its claim is kept as the released daemon kept it.
     const credential = authenticated?.credentialKind;
-    const registeredProgram = isRegisteredProgram(input.context?.call?.registration);
     if (context?.explicitUserRequest === true && !ownerApproved
-      && ((credential !== 'user-session' && credential !== 'device-token' && credential !== 'local') || (credential === 'local' && !registeredProgram))) {
+      && (credential !== 'user-session' && credential !== 'device-token' && credential !== 'local')) {
       context = { ...context, explicitUserRequest: undefined };
     }
     // A model never makes what the effect table says no model causes (granting or withdrawing access, a sign-in, a

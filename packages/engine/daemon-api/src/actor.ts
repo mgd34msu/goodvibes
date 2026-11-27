@@ -14,14 +14,9 @@ import { scopeMatches } from './route-helpers.js';
 export type ActorClass =
   /** The person the daemon belongs to: the operator token, the local credential, the owner user, a channel's owner. */
   | 'owner'
-  /** A user with the admin role who is not the owner, or any full pairing (the owner's own device too: `ownerDevice`). */
+  /** Not assigned: a sign-in with the admin role and every full pairing are of the owner's class (one user, one admin). */
   | 'admin'
-  /**
-   * The operator token (or the Agent's credential) presented without a registration the daemon issued to one of the
-   * owner's own programs it verified: a script on this machine (or a holder of the token elsewhere), whoever it is. It
-   * holds every scope as an admin does and is never the owner: an act only the owner makes is refused it or put to the owner.
-   * Given by the daemon once it knows whether the request carries a checked registration (`scriptActor`).
-   */
+  /** Not assigned: the daemon no longer gives this class to any credential (`scriptActor` is applied nowhere). */
   | 'script'
   /** A signed-in user without the admin role. */
   | 'member'
@@ -49,10 +44,8 @@ export interface Actor {
   /** Set when a model is acting: the actor whose turn it is. The model never exceeds this actor. */
   readonly agentFor?: Actor | undefined;
   /**
-   * A device the owner paired in person (their pairing flow, made by them). Its class is `admin`: it is never the owner
-   * in person. This mark gives it one thing more: it answers a question some OTHER caller raised (never one it raised,
-   * nor one of the credentials made from it, listed here) and does the owner's native work (platform
-   * daemon/method-owner-decision.ts `ownersDevice`).
+   * A device the owner paired through their pairing flow. Its class is `owner` like every full pairing; the mark records
+   * the credentials made from it, which the approval viewer reads (platform control-plane/approval-actions.ts).
    */
   readonly ownerDevice?: OwnerDeviceMark | undefined;
 }
@@ -93,29 +86,28 @@ function scopesOf(principal: ActorPrincipal, full: boolean): ReadonlySet<string>
   return new Set(principal.scopes ?? []);
 }
 
-function classOf(principal: ActorPrincipal, owner: OwnerIdentity): ActorClass {
+// The owner identity is no longer read: no username is the owner by name, every admin sign-in is of the owner's class.
+function classOf(principal: ActorPrincipal, _owner: OwnerIdentity): ActorClass {
   if (principal.principalKind === 'remote-peer') return 'peer';
   switch (principal.credentialKind) {
     case 'local':
     case 'shared-token':
-      // The operator token's class. Every script and command line holds it, so nothing is granted by this class alone:
-      // the owner in person, their program, is asked of platform daemon/method-owner-decision.ts (`ownerHimself`,
-      // `ownersProgramCaller`: a checked registration of their program, their sign-in, their own device).
+      // The operator token's class: the user's, whichever process holds it (platform daemon/method-owner-decision.ts
+      // `ownerHimself`).
       return 'owner';
     case 'device-token':
-      // A full pairing is an admin, the owner's own device included: a device is never the owner in person, whatever
-      // its origin says (the owner's device carries `ownerDevice`, which answers others' questions and nothing more); a
-      // pairing with a stored list holds that list.
-      if (principal.admin === true) return 'admin';
+      // A full pairing is of the owner's class as in v3.5.0 (there is one user, and every device they pair is theirs,
+      // whoever's pairing flow made it); a pairing with a stored list holds that list.
+      if (principal.admin === true) return 'owner';
       return 'device';
     case 'agent':
-      // The Agent's credential is made only for the owner in person (platform daemon/method-owner-decision.ts
-      // `mintsAgentCredential`), so it is their model. The class is the credential's fact, read before the router checks
-      // the program's registration: what that model may do as their program (a decided call, any file, any project,
-      // native authority) is asked of `ownersAgentProgram`, never of this class; without its program it is a script.
+      // The Agent's credential is the user's model (platform daemon/method-owner-decision.ts `mintsAgentCredential`). The
+      // class is the credential's fact; what that model may do as the user's program (a decided call, any file, any
+      // project, native authority) is asked of `ownersAgentProgram`, and `agentFor` keeps it a model.
       return 'owner';
     case 'user-session':
-      if (principal.admin === true) return owner.ownerUser !== null && principal.principalId === owner.ownerUser ? 'owner' : 'admin';
+      // A sign-in with the admin role is of the owner's class whatever its username (one user, one admin).
+      if (principal.admin === true) return 'owner';
       return 'member';
     default:
       // A principal the transport did not name a credential for (an in-process
@@ -145,17 +137,16 @@ function signInIdApart(principal: ActorPrincipal): string | undefined {
 
 /**
  * The actor an authenticated principal is. The operator token, the local
- * credential and the owner user are of the owner's class (who is the owner
- * in person is asked of platform daemon/method-owner-decision.ts); an admin
- * user and every full pairing, the owner's own device included, are `admin`
- * (the owner's device marked `ownerDevice`); a user without the admin role is
- * `member`; a pairing with a stored scope list is `device`; the Agent's
+ * credential, every sign-in with the admin role (whatever its username) and
+ * every full pairing are of the owner's class (the user: platform
+ * daemon/method-owner-decision.ts `isTheUser`); a user without the admin role
+ * is `member`; a pairing with a stored scope list is `device`; the Agent's
  * credential is the model acting for the owner.
  */
 export function actorFromPrincipal(principal: ActorPrincipal, owner: OwnerIdentity,
   via: Actor['via'] = 'http'): Actor {
   const actorClass = classOf(principal, owner);
-  const ownerDevice = principal.credentialKind === 'device-token' && principal.ownerDevice === true && actorClass === 'admin';
+  const ownerDevice = principal.credentialKind === 'device-token' && principal.ownerDevice === true && principal.admin === true;
   const base: Actor = Object.freeze({
     class: actorClass,
     id: actorClass === 'peer' ? `peer:${principal.principalId ?? 'unknown'}` : signInIdApart(principal) ?? principal.principalId ?? principal.credentialKind ?? 'unknown',
@@ -202,9 +193,9 @@ export function localOwnerActor(): Actor {
 }
 
 /**
- * The actor a credential of the owner's program's kind is when its request carries no registration of their verified
- * program: a script (see `ActorClass`). Same id and channel as the credential's own actor; every scope; never the
- * owner, never a model's turn.
+ * The `script` actor: same id and channel as the credential's own actor, every scope, never the owner and never a model's
+ * turn. The daemon no longer applies it anywhere (the operator token and the Agent's credential are the user's with or
+ * without a program's registration); it stays exported.
  */
 export function scriptActor(of: Actor): Actor {
   const base = of.agentFor ?? of;

@@ -3,21 +3,23 @@
  * (daemon/control-plane.ts `dispatchGatewayMethodCall`, by its id, its REST route and the WebSocket alike) and a
  * capability (control-plane/routes/capabilities.ts) are decided by the same functions here.
  *
- * Who runs an act of a class other than `none` (control-plane/method-risk.ts) at once: the owner's own program with a
- * person's press (`ownersOwnPress`). The owner's own program is their signed-in session, or the operator token from a terminal
- * program whose registration the daemon checked (daemon/program-registrations.ts): the operator token alone is held by
- * every command line and script on the machine, so it is never the owner's program by itself. Anyone else (a script or a
- * program with the operator token and no press, the MCP server's own credential, any paired device, the owner's own device
- * included, a member paired as admin, a person's press on such a
- * credential) is decided by the owner's capability gate exactly as the capability that does the same act: put to the owner,
- * opening on No, or decided under the owner's mode. A `steers-a-model` write from the owner's own program is theirs (their press,
- * or their model in their own conversation, kept with its author by the store): only anyone else's is decided.
+ * There is one user. Every authenticated caller that is not a model (`agentFor` set), a chat guest, a peer node or the
+ * program itself is that user ({@link isTheUser}): their signed-in session under any name and role, any paired device, the
+ * machine's token from any process, the Agent's and the MCP set-up's credential when no model is acting, a typed `do`. The
+ * functions below give every one of them the same answer; what limits a credential is its stored scope list, checked where
+ * methods are admitted by scope, and nothing here.
+ *
+ * Who runs an act of a class other than `none` (control-plane/method-risk.ts) at once: the user with a person's press
+ * (`ownersOwnPress`: a request on their signed-in session, or the person's claim on a credential that may make it). The user's
+ * call without a press is decided by the owner's capability gate exactly as the capability that does the same act: put to
+ * the owner, opening on No, or decided under the owner's mode. A `steers-a-model` write from the user is theirs; a model's
+ * is decided.
  *
  * Not decided here, so never twice:
  *  - a call nested in a capability that was decided already (`capabilityDecidedMark`), or one the owner approved
  *    (the owner's one-call grant);
- *  - a call the program's own gate decided: the Agent's credential with that gate's mark, or the owner's own
- *    registered program with the mark;
+ *  - a call the program's own gate decided: the Agent's credential with that gate's mark, or the user's own
+ *    program (any credential of the user) with the mark;
  *  - a call the run's own answerer decided (`decidedInRun`), and a natively admitted method called with the Agent's
  *    credential (its native admission is its one decision, control-plane/native-admission-methods.ts);
  *  - the daemon's own in-process calls (the system actor).
@@ -30,9 +32,6 @@ import type { MethodRisk } from '../control-plane/method-risk.js';
 import { ANSWER_METHOD_IDS, VALUE_DECIDED_METHOD_IDS } from '../control-plane/method-risk.js';
 import { NATIVELY_ADMITTED_METHOD_IDS } from '../control-plane/native-admission-methods.js';
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
-// Every program the daemon issues a verified registration to (daemon/program-registrations.ts): one list, so a program
-// added there is the owner's program at every check here.
-import { isCommandLineRegistration, isRegisteredProgram } from './program-registrations.js';
 
 /** Who made a call, as the dispatch established it. */
 export interface CallerFacts {
@@ -84,61 +83,57 @@ export function wellFormedActor(actor: Actor | undefined): actor is Actor {
 }
 
 /**
- * The ONE definition of the owner in person, read by every check of that kind (who acts, answers and names projects as
- * the owner, whose message is their own turn, who holds the owner's native authority): exactly two things, both the
- * owner being there: their signed-in session (the owner account, on a session the daemon issued) and the operator token
- * from their own terminal program holding a live registration the daemon verified (daemon/program-registrations.ts).
- * Never a paired device, whatever its origin mark says (the owner's own device is `ownersDevice`, which answers questions other
- * callers raised and nothing more); never the operator token alone (every command line and script on the machine
- * holds it); never a model's credential; never an admin or member who is not the owner; never a record, a token, a
- * mark or a message carried in from a caller, a yes to someone else's request, a peer machine, a file or an upgrade.
+ * Whether `actor` is the user: an actor the daemon built (well formed) that is not a model (`agentFor`), a chat guest, a
+ * peer node or the program itself (`system`). Whatever its class (a sign-in under any username and role, a full or narrow
+ * pairing, the operator token), the user is one person.
  */
-export function ownerHimself(caller: Pick<CallerFacts, 'actor' | 'credentialKind' | 'registration'>): boolean {
-  const actor = caller.actor;
-  if (!actor || actor.class !== 'owner' || actor.agentFor !== undefined) return false;
-  if (caller.credentialKind === 'user-session') return true;
-  return caller.credentialKind === 'local' && isRegisteredProgram(caller.registration);
+export function isTheUser(actor: Actor | undefined): actor is Actor {
+  if (!wellFormedActor(actor) || actor.agentFor !== undefined) return false;
+  return actor.class !== 'guest' && actor.class !== 'peer' && actor.class !== 'system';
 }
 
 /**
- * A device the owner paired in person (their pairing flow, started from their verified program or their signed-in session and
- * completed with the code their own screen showed; pairing-token-store.ts `ownerDeviceOf`): their phone, or a program of
- * theirs on a computer that cannot prove itself to the daemon. It is NOT the owner in person. It may do exactly this beyond
- * what its scopes allow anyone: answer a question that some OTHER caller raised (never one it raised, nor one of a
- * credential made from it: the approval viewer checks the question's asker, control-plane/approval-actions.ts), and
- * do the owner's native work (their turns, under their mode). Its own risky acts are put to the owner like anyone's.
+ * The ONE definition of the user, read by every check of that kind (who acts, answers and names projects, whose message is
+ * their own turn): an authenticated caller (it has a credential kind) whose actor is the user ({@link isTheUser}), from any
+ * credential: their signed-in session under any username, any paired device, the operator token from any process with or
+ * without a program's registration, the Agent's credential when no model is acting. Never a model's credential (the model
+ * a credential carries stays a model), a chat guest, a peer machine or the program itself.
+ */
+export function ownerHimself(caller: Pick<CallerFacts, 'actor' | 'credentialKind' | 'registration'>): boolean {
+  if (caller.credentialKind === undefined || caller.credentialKind === null || caller.credentialKind === '') return false;
+  return isTheUser(caller.actor);
+}
+
+/**
+ * A paired device (any pairing, whatever its scope list): the user's own device. It does what the user does, limited only by
+ * its stored scope list, which is checked where methods are admitted by scope. It answers a question some caller raised (the
+ * approval viewer's own rule for who may read which question, control-plane/approval-actions.ts, is not decided here) and
+ * does the user's native work.
  */
 export function ownersDevice(caller: Pick<CallerFacts, 'actor' | 'credentialKind'>): boolean {
-  const actor = caller.actor;
-  return caller.credentialKind === 'device-token' && actor !== undefined && actor.agentFor === undefined
-    && actor.class === 'admin' && actor.ownerDevice !== undefined;
+  return caller.credentialKind === 'device-token' && isTheUser(caller.actor);
 }
 
 /** The answering methods an owner's device may call: an approval's answer, which the approval viewer checks per asker. */
 export const OWNER_DEVICE_ANSWER_METHOD_IDS: ReadonlySet<string> = new Set(['approvals.approve', 'approvals.deny']);
 
 /**
- * The owner's own program's model acting for them: the Agent's credential (kind `agent`, their model; the model tools of the
- * Agent and of the terminal app both use it) presented together with the registration the daemon issued to that
- * program's process it verified (the router checks the key against the operator token the program registered with,
- * daemon/http/router.ts `bindCheckedRegistration`), or a call of an Agent turn the
- * daemon itself hosts (served to itself in process). The credential alone is a script, whoever minted it: it is a file
- * any process of the account reads (terminal-shell agent-delegation-credential.ts). Only this is believed when it says
- * its gate decided a call (`x-goodvibes-decided-by-capability-gate`, `x-goodvibes-decided-in-run`), names a file or a
- * project as the owner's program, or names the conversation it registered.
+ * The user's own Agent: the Agent's credential (kind `agent`; the model tools of the Agent and of the terminal app both use
+ * it) carrying the user as the one it acts for. It needs no program registration: the credential is the user's program.
+ * The model it carries stays a model (`agentFor` stays set on its actor, so {@link ownerHimself} and the checks that tell a
+ * model from the user still see a model); this answers only whether the program holding the credential is the user's, which
+ * is what lets it say its gate decided a call (`x-goodvibes-decided-by-capability-gate`, `x-goodvibes-decided-in-run`), name a
+ * file or a project, or name the conversation it registered.
  */
 export function ownersAgentProgram(caller: Pick<CallerFacts, 'actor' | 'credentialKind' | 'registration' | 'daemonHosted'>): boolean {
   if (caller.credentialKind !== 'agent') return false;
-  const acting = caller.actor?.agentFor;
-  if (acting === undefined || acting.class !== 'owner') return false;
-  return isRegisteredProgram(caller.registration) || caller.daemonHosted === true;
+  return isTheUser(caller.actor?.agentFor);
 }
 
 /**
- * Who works as the owner's own program (names any file on the daemon's disk, any project, reaches every record): the
- * owner in person ({@link ownerHimself}), their Agent program ({@link ownersAgentProgram}), or a turn the daemon itself hosts
- * calling its own request path with its operator credential. Never by the kind of credential alone: the operator token
- * from a script, the operator token from another machine and the Agent's credential without its program are scripts.
+ * Who works as the user's own program (names any file on the daemon's disk, any project, reaches every record): the user
+ * ({@link ownerHimself}), their Agent program ({@link ownersAgentProgram}), their command line, or a turn the daemon itself
+ * hosts calling its own request path with its operator credential.
  */
 export function ownersProgramCaller(caller: Pick<CallerFacts, 'actor' | 'credentialKind' | 'registration' | 'daemonHosted'>): boolean {
   return ownerHimself(caller) || ownersAgentProgram(caller) || ownersCommandLine(caller)
@@ -146,25 +141,19 @@ export function ownersProgramCaller(caller: Pick<CallerFacts, 'actor' | 'credent
 }
 
 /**
- * A verified command line of the owner's (`do`, `find` of the product's own binary, registered over the program socket
- * as its own kind: daemon/program-registrations.ts `COMMAND_LINE_REGISTRATION`, with the operator token of this machine).
- * It is the owner's own program FOR WHERE IT WORKS: it names the folder it was typed in as the terminal app does and
- * reaches what the owner reaches there for reads. It makes the acts only the owner makes ({@link makesOwnerOnlyAct}). It is
- * never a person's press: every risky capability it sends, the owner's own acts included, is decided by the daemon's gate
- * under the mode in force (capabilities/command-line-hold.ts, control-plane/routes/capabilities.ts), and it answers no
- * question and approves nothing (`ownerAnswers` reads `ownerHimself`, which it is not).
+ * The user's command line (`do`, `find` of the product's own binary, with the operator token of this machine, a program's
+ * registration or none). It is the user: it names the folder it was typed in as the terminal app does, reaches what the user
+ * reaches there, and makes the acts only the user makes ({@link makesOwnerOnlyAct}). Whether a risky capability it sends is
+ * held for the owner's gate is the capability layer's own rule (capabilities/command-line-hold.ts, control-plane/routes/
+ * capabilities.ts), not decided here.
  */
 export function ownersCommandLine(caller: Pick<CallerFacts, 'actor' | 'credentialKind' | 'registration'>): boolean {
-  const actor = caller.actor;
-  return actor !== undefined && actor.class === 'owner' && actor.agentFor === undefined
-    && caller.credentialKind === 'local' && isCommandLineRegistration(caller.registration);
+  return caller.credentialKind === 'local' && isTheUser(caller.actor);
 }
 
 /**
- * Who mints the Agent's credential (`pairing.tokens.create` with `client: "agent"`): the owner in person (their sign-in, their
- * registered program) or an Agent turn the daemon hosts. Anyone else (an admin or member who is not the owner, any
- * device, the owner's own device included, the operator token from a script, the outside agent's credential) is refused: the
- * credential is the owner's model, so no yes of theirs turns it into anyone else's.
+ * Who mints the Agent's credential (`pairing.tokens.create` with `client: "agent"`): the user, from any credential, or the
+ * program itself. A model never does (the actor of a model is not the user).
  */
 export function mintsAgentCredential(caller: Pick<CallerFacts, 'actor' | 'credentialKind' | 'registration' | 'daemonHosted'>): boolean {
   if (caller.actor?.class === 'system') return true;
@@ -176,10 +165,9 @@ export const AGENT_CREDENTIAL_OWNER_ONLY_WORDS = 'The Agent\'s credential acts a
   + '(or the owner\'s own sign-in) has one made; this caller is not the owner in person. Nothing was made, and nothing was put to the owner.';
 
 /**
- * The owner in person on their signed-in session ({@link ownerHimself}, signed in with their password, on a session the daemon
- * issued: the web UI). Every request on it is their own press: the session's cookie is HttpOnly and SameSite=Strict, and
- * a request from another site's page is refused by the daemon's origin check, so no other page, device or token holder
- * makes one.
+ * The user on a signed-in session ({@link ownerHimself}: the web UI, under any username and role). Every request on it is
+ * their own press: the session's cookie is HttpOnly and SameSite=Strict, and a request from another site's page is refused
+ * by the daemon's origin check, so no other page, device or token holder makes one.
  */
 export function ownersOwnSession(caller: Pick<CallerFacts, 'actor' | 'credentialKind'>): boolean {
   return caller.credentialKind === 'user-session' && ownerHimself({ ...caller, registration: undefined });
@@ -187,10 +175,10 @@ export function ownersOwnSession(caller: Pick<CallerFacts, 'actor' | 'credential
 
 /**
  * Whose call this is, as what it makes keeps it (a schedule, a trigger, a watch, a task: security/turn-input-party.ts
- * `recordedCauseInScope`): the owner's for the owner in person ({@link ownerHimself}) and their own Agent program's model on
- * their own input; someone else's for every other credential (a paired device, the owner's own phone included, a member, an
- * admin who is not the owner, the outside agent, a script or command line with the operator token), named by its class and
- * id. Undefined for the daemon's own in-process calls and a turn it hosts (its turn's party stands).
+ * `recordedCauseInScope`): the user's, from every credential ({@link ownerHimself}: any sign-in, any device, the operator
+ * token, a command line), and their own Agent program's model on their own input; someone else's only for a model on
+ * someone else's input, a guest or a peer, named by its class and id. Undefined for the daemon's own in-process calls and
+ * a turn it hosts (its turn's party stands).
  */
 export function partyOfCaller(caller: Pick<CallerFacts, 'actor' | 'credentialKind' | 'registration' | 'daemonHosted'> & {
   readonly principalId?: string | undefined; readonly othersInput?: boolean | undefined;
@@ -204,7 +192,7 @@ export function partyOfCaller(caller: Pick<CallerFacts, 'actor' | 'credentialKin
     ...(caller.principalId ? { madeFor: caller.principalId } : {}) };
 }
 
-/** The owner's own press: a person's claim in the owner's own program, or anything on their own signed-in session. */
+/** The user's own press: a person's claim on a credential that may make it, or anything on a signed-in session. */
 export function ownersOwnPress(caller: CallerFacts): boolean {
   return ownersOwnSession(caller) || (caller.personAsked && ownerHimself(caller));
 }
@@ -279,31 +267,27 @@ export const OWNER_ANSWERS_ONLY_WORDS = 'Only the owner answers this, in person:
   + 'the web UI or a phone the owner paired. Nothing was answered, and nothing was put to the owner.';
 
 /**
- * Whether this caller answers a question addressed to the owner: their own press in their own program (`ownersOwnPress`),
- * their sign-in (the web UI), the daemon itself, a run's own answerer (`decidedInRun`, the Agent's credential only), or a
- * call nested in an answer that was admitted already (`decidedUpstream`). A program's gate never answers for the owner.
+ * Whether this caller answers a question addressed to the owner: the user from any credential ({@link ownerHimself}), the
+ * daemon itself, a run's own answerer (`decidedInRun`, the Agent's credential only), or a call nested in an answer that was
+ * admitted already (`decidedUpstream`). A model never answers for the user. The credential's own scope list still limits which
+ * answering methods it reaches (the effect table, security/effect-authority.ts).
  */
 export function ownerAnswers(caller: CallerFacts, decided: { readonly decidedInRun?: boolean; readonly decidedUpstream?: boolean } = {}): boolean {
   // No actor, or one the daemon did not build, never answers for the owner.
   if (!wellFormedActor(caller.actor)) return false;
   if (caller.actor.class === 'system') return true;
   if (decided.decidedInRun === true || decided.decidedUpstream === true) return true;
-  if (ownersOwnPress(caller)) return true;
-  return caller.credentialKind === 'user-session' && caller.actor.class === 'owner' && caller.actor.agentFor === undefined;
+  return ownersOwnPress(caller) || ownerHimself(caller);
 }
 
 /**
- * Who makes an act only the owner makes (control-plane/method-risk.ts `owner-act`, `OWNER_ONLY_CAPABILITIES`): the owner
- * in person ({@link ownerHimself}), the daemon itself, the owner's own command line ({@link ownersCommandLine}: a `do` typed
- * at the product's own verified program on this machine, which is how the owner scripts the product; its act is decided under
- * the mode in force as an item of the owner's list, exactly as the same act from the owner's own program without a press),
- * and the owner's own model in their own turn (one of the daemon's turns on their input, or their Agent program's model:
- * `ownersOwnTurn`), which makes it under their mode unless a model never makes it (the effect table's `model.refused`,
- * refused on its own). Anyone else (a paired device, the owner's own phone included, an admin or member sign-in that is not
- * the owner's, the outside agent, a script holding the operator token without the verified program, another caller's turn)
- * is refused, in every mode, before anything is decided: never put to the owner as a question. A model that runs
- * `goodvibes do` as a command is running a command: decided as a command by the turn's gate, and never reaching the daemon
- * from inside the sandbox.
+ * Who makes an act only the owner makes (control-plane/method-risk.ts `owner-act`, `OWNER_ONLY_CAPABILITIES`): the user from
+ * any credential ({@link ownerHimself}, {@link ownersCommandLine}: a sign-in under any username, a device, the operator token
+ * from any process, a typed `do`), the daemon itself, and the user's own model in their own turn (one of the daemon's turns
+ * on their input, or their Agent program's model: `ownersOwnTurn`), which makes it under their mode unless a model never makes
+ * it (the effect table's `model.refused`, refused on its own). A guest, a peer and another caller's turn are refused, in
+ * every mode, before anything is decided: never put to the owner as a question. A model that runs `goodvibes do` as a command
+ * is running a command: decided as a command by the turn's gate, and never reaching the daemon from inside the sandbox.
  */
 export function makesOwnerOnlyAct(caller: Pick<CallerFacts, 'actor' | 'credentialKind' | 'registration'> & { readonly ownersOwnTurn?: boolean | undefined }): boolean {
   if (caller.actor?.class === 'system' && caller.actor.agentFor === undefined) return true;

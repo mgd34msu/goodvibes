@@ -25,7 +25,7 @@ import type {
 } from './method-catalog-shared.js';
 import { RefusalError } from '@goodvibes/engine/errors';
 import { GatewayVerbError, readGatewayVerbRefusal } from './routes/gateway-verb-error.js';
-import { isRegisteredProgram } from '../daemon/program-registrations.js';
+import { ownersAgentProgram } from '../daemon/method-owner-decision.js';
 
 /** Function returned by every registration; calling it removes the attached handler. */
 export type Unregister = () => void;
@@ -99,9 +99,10 @@ export function normalizeContext(
     ...(context.actor ? { actor: context.actor } : {}),
     ...(context.transport ? { transport: context.transport } : {}),
     // Set by the dispatch only for the owner's own Agent program (daemon/control-plane.ts `decidedInRun`,
-    // method-owner-decision.ts `ownersAgentProgram`): its credential with its checked registration, or a hosted turn.
+    // method-owner-decision.ts `ownersAgentProgram`): the user's Agent credential, with or without a registration.
     ...(metadata['decidedInRun'] === true && context.credentialKind === 'agent'
-      && (isRegisteredProgram(context.call?.registration) || context.call?.daemonHosted === true) ? { decidedInRun: true } : {}),
+      && ownersAgentProgram({ actor: context.actor, credentialKind: 'agent', registration: context.call?.registration,
+        daemonHosted: context.call?.daemonHosted === true }) ? { decidedInRun: true } : {}),
   };
 }
 

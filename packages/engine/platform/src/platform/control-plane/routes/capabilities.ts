@@ -60,7 +60,7 @@ import { withArtifactMaker } from '../../artifacts/turn-maker.js';
 import { methodCallRisk, OWNER_ONLY_WHERE, ownerOnlyCapabilityCall, ownerOnlyMethodArea, riskOfDescriptor, type MethodRisk, type OwnerOnlyArea } from '../method-risk.js';
 import { OUTSIDE_AGENT_ISSUE_METHOD_ID, outsideAgentQuestion } from '../method-catalog-programs.js';
 import { sharedKindGivenForCapability } from '../shared-kinds.js';
-import { answersTheOwner, makesOwnerOnlyAct, MODEL_NEVER, modelNeverWords, OWNER_ANSWERS_ONLY, OWNER_ANSWERS_ONLY_WORDS, OWNER_ONLY_ACT, ownerAnswers,
+import { answersTheOwner, isTheUser, makesOwnerOnlyAct, MODEL_NEVER, modelNeverWords, OWNER_ANSWERS_ONLY, OWNER_ANSWERS_ONLY_WORDS, OWNER_ONLY_ACT, ownerAnswers,
   ownerOnlyActWords, ownersCommandLine, ownersAgentProgram, ownersOwnPress, ownersProgramCaller } from '../../daemon/method-owner-decision.js';
 import { isCommandLineRegistration } from '../../daemon/program-registrations.js';
 import type { WorkCause } from '../../workflow/work-ledger/work-plans.js';
@@ -395,7 +395,7 @@ function causeOfRun(at: GatewayMethodInvocation, facts: { readonly ownerAnswered
 function actOfRun(at: GatewayMethodInvocation, ownerAnswer: boolean): SettingAct {
   const actor = at.context.actor ?? systemActor('in-process');
   const by = at.context.principalId ?? actor.id;
-  const owner = actor.class === 'owner' && actor.agentFor === undefined;
+  const owner = isTheUser(actor);
   if (ownerAnswer) return { by, owner, how: 'yes' };
   if (personAsked(at) && owner) return { by, owner, how: 'press' };
   return { by, owner, how: 'rules' };
@@ -717,7 +717,7 @@ function createRunHandler(deps: CapabilityRouteDeps, methods: Pick<GatewayMethod
       const othersOwnerEffects = ownerDecided ? [] : ownersOwnEffects(actor, effects);
       const hisOwnTurn = ownerDecided && invocation.context.call?.othersInput !== true;
       const othersOwnAct = othersOwnerEffects.length > 0
-        || (definition.ownersAct === true && !ownerDecided && actor.agentFor === undefined && actor.class !== 'owner' && actor.class !== 'system')
+        || (definition.ownersAct === true && !ownerDecided && actor.agentFor === undefined && !isTheUser(actor) && actor.class !== 'system')
         || (caller.ownerHimself !== true && !hisOwnTurn && actor.class !== 'owner' && actor.class !== 'system' && definition.ownersActWhen?.(values, deps.services) === true);
       // An answer keeps its own rule and words (`ownerAnswers`, below).
       if (othersOwnAct && !answers) {
@@ -748,7 +748,7 @@ function createRunHandler(deps: CapabilityRouteDeps, methods: Pick<GatewayMethod
       // capability), asked for by a caller who is not the owner: refused, in every mode, never put to the owner.
       const othersOwnerEffects = ownersOwnEffects(actor, declared);
       if (othersOwnerEffects.length > 0
-        || (methodCapability(entry.id)?.ownersAct === true && actor.agentFor === undefined && actor.class !== 'owner' && actor.class !== 'system')) {
+        || (methodCapability(entry.id)?.ownersAct === true && actor.agentFor === undefined && !isTheUser(actor) && actor.class !== 'system')) {
         throw new GatewayVerbError(ownerOnlyActWords(`${entry.label} (${entry.id})`, OWNER_ONLY_WHERE[othersOwnerEffects.length > 0 ? ownerOnlyEffectArea(othersOwnerEffects[0]!) : ownerOnlyMethodArea(entry.method.id)]),
           OWNER_ONLY_ACT, 403, 'id', { state: 'nothing ran' });
       }

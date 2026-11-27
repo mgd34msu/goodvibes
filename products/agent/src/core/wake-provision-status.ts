@@ -3,7 +3,7 @@ import { createWakeProvisionPresentation } from '@goodvibes/engine/terminal-shel
 // wake-provision-status.ts, the surface-facing projection of wake-word
 // provisioning and of the `voice.wake.*` rows that are or are not in force.
 //
-// The wake artifacts are checksum-pinned and provisioned by /voice wake-setup, or
+// The wake artifacts are checksum-pinned and provisioned by the capability "Set up the wake word" (System, Voice), or
 // fetched automatically when wake detection is turned on for this surface. This module is the read-only projection those surfaces
 // render from: per-artifact present / verified / corrupt / bytes taken straight
 // from the platform's wakeProvisionStatus, which verifies by CONTENT rather than by
@@ -37,8 +37,8 @@ function vadThresholdNote(threshold: number): string {
 /**
  * Bytes as a short human string.
  *
- * Local because this repository has no shared byte formatter, `/voice status`
- * divides by 1024*1024 inline at its call site, and the file tree has its own.
+ * Local because this repository has no shared byte formatter, the voice status
+ * lines divide by 1024*1024 inline at their call site, and the file tree has its own.
  * One place for the wake surfaces beats a third inline division.
  */
 export function formatWakeBytes(bytes: number): string {
@@ -53,8 +53,8 @@ export function formatWakeBytes(bytes: number): string {
  * reported rather than faked.
  *
  * Lives here, beside the status projection and away from the inference runtime,
- * so `/voice wake-status` can resolve settings without pulling onnxruntime into a
- * status call.
+ * so the capability "See wake-word detection" (System, Voice) can resolve settings without
+ * pulling onnxruntime into a status call.
  */
 export function agentWakeCapabilities(options: { readonly vadReady: boolean }): WakeSurfaceCapabilities {
   return {

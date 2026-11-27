@@ -524,7 +524,8 @@ function createRunTool(registry: ToolRegistry, options: CapabilityToolOptions, h
         try {
           // Every file it names by path is held from its check to its use, for the whole run (capabilities/held-paths.ts).
           const result = await runHoldingPaths(() => capability.run(values, session, { workingDirectory: options.workingDirectory(), ...(options.program ? { program: options.program } : {}) }));
-          return { success: true, output: capabilityOutcomeText(entry, values, result) || `${entry.label}: done.` };
+          // A run that says nothing on a typed line (a /clear, a quit) tells a model what it did in its own sentence.
+          return { success: true, output: capabilityOutcomeText(entry, values, result) || capability.doneInPlace || `${entry.label}: done.` };
         } catch (error) {
           if (error instanceof CapabilityRefusal) return { success: false, error: error.next ? `${error.message} ${error.next}.` : error.message };
           // A program's own refusal (nothing to compact, a turn still running): its words are the answer.

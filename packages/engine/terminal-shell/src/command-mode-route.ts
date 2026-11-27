@@ -64,7 +64,7 @@ const COMMAND_LINE_CURSOR_KEYS: readonly string[] = ['left', 'right', 'home', 'e
  */
 export function unknownCommandMessage(name: string): string {
   if (name.toLowerCase() === 'secrets') {
-    return 'There is no /secrets command: nothing was stored and nothing was sent. Secrets are set in the menu (the leader key, Ctrl+G unless you changed it, then m), in Safety, under Secrets, "store one".';
+    return 'There is no /secrets command: nothing was stored and nothing was sent. Secrets are set in the menu (the leader key, Ctrl+G unless you changed it, then m), in Permissions and safety, under Secrets, "store one".';
   }
   return `Unknown command: /${name}. Type /help for the commands; everything else is in the menu (the leader key, Ctrl+G unless you changed it, then m).`;
 }

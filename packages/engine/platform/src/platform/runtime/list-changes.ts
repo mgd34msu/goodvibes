@@ -23,6 +23,9 @@ import type { EventAbout } from '../../events/about.js';
 export type ChangedList = 'memory' | 'checkpoints' | 'ci-watches' | 'check-ins' | 'people'
   | 'mail' | 'calendar' | 'dates' | 'paired-devices' | 'telegram-intake' | 'voice' | 'tailscale' | 'relay'
   | 'remote-runners'
+  // Projects: a folder was registered as a project or let go (control-plane/routes/workspaces.ts), by any program or screen;
+  // a project chooser reads the project list again.
+  | 'workspaces'
   // Work and agents: a research run or a source in the research queue changed, or work was handed to the terminal app
   // (terminal-shell agent-turn/agent-store-research.ts, agent-store-handoff.ts).
   | 'research' | 'handed-off'
@@ -121,7 +124,7 @@ export const LIST_CHANGE_NAMES: Readonly<Record<ChangedList, 'project' | 'shared
   'ci-watches': 'shared', 'check-ins': 'shared', people: 'shared', mail: 'shared', calendar: 'shared', dates: 'shared',
   'paired-devices': 'shared', 'telegram-intake': 'shared', voice: 'shared', tailscale: 'shared', relay: 'shared',
   work: 'project',
-  'remote-runners': 'shared', research: 'shared', 'handed-off': 'shared', safety: 'shared',
+  'remote-runners': 'shared', workspaces: 'shared', research: 'shared', 'handed-off': 'shared', safety: 'shared',
   payments: 'shared', spending: 'shared', notes: 'shared', personas: 'shared', routines: 'shared', documents: 'shared',
   artifacts: 'shared', 'agent-homes': 'shared', profile: 'shared', templates: 'shared', models: 'shared',
   'network-scan': 'shared', 'settings-sync': 'shared', 'machine-group': 'shared',

@@ -46,6 +46,7 @@ export interface DecisionModelReadinessOptions {
 
 /** Why the gate has no decision model to hand `jev-decides` calls to; undefined when it has one. */
 export type DecisionModelUnreadyReason =
+  | { readonly kind: 'selected' }
   | { readonly kind: 'not-set' }
   | { readonly kind: 'uncalibrated' }
   | { readonly kind: 'failing'; readonly model: string; readonly what: string; readonly since: number };
@@ -56,7 +57,7 @@ function readinessReason(
 ): DecisionModelUnreadyReason | undefined {
   const env = options.env ?? process.env;
   const settings = decisionModelSettings(key => configManager.get(key));
-  if (!decisionModelReady(settings, env)) return { kind: 'not-set' };
+  if (!decisionModelReady(settings, env)) return settings.policy === 'No Decision Model' ? { kind: 'selected' } : { kind: 'not-set' };
   // A set model counts as working only while it answers: from its first
   // failure until it answers again (runtime/decision-policy.ts, one memory read).
   const failure = options.assumeAnswering === true ? undefined : decisionModelFailure();
@@ -110,7 +111,9 @@ export function describePermissionModeInForce(
     : undefined;
   const mode = effectivePermissionMode(chosen, false, why === undefined);
   if (why === undefined || mode === chosen) return { chosen, mode };
-  const reason = why.kind === 'not-set'
+  const reason = why.kind === 'selected'
+    ? 'you turned decision models off, so Jev cannot decide and every call it would decide asks you'
+    : why.kind === 'not-set'
       ? 'no decision model is set, so every call Jev would decide asks you (to use one, choose a Decision model in /settings open)'
       : why.kind === 'uncalibrated'
         ? 'Jev decides is only the shipped default here and its decisions were not measured on this decision model; choose Jev decides yourself (shift+tab, or /settings open) to use it'
@@ -160,6 +163,7 @@ const UNREACHABLE_FAILURE = /could not be reached|did not answer in time|did not
 /** The few words of becauseSentence, for the chip and the status bar: the same state in the same words. */
 function becauseWords(why: DecisionModelUnreadyReason): string {
   switch (why.kind) {
+    case 'selected': return 'decision models switched off';
     case 'not-set': return 'no decision model set';
     case 'uncalibrated': return 'not measured yet';
     case 'failing': return UNREACHABLE_FAILURE.test(why.what) ? 'decision model unreachable' : 'decision model failing';
@@ -173,6 +177,7 @@ function becauseWords(why: DecisionModelUnreadyReason): string {
  */
 function chosenWhenWords(why: DecisionModelUnreadyReason): string {
   switch (why.kind) {
+    case 'selected': return 'once decision models are on';
     case 'not-set': return 'once a decision model is set';
     case 'uncalibrated': return 'once you pick it yourself (not measured on this decision model)';
     case 'failing': return 'once the decision model answers again';
@@ -208,6 +213,7 @@ export function readModeInForceWords(value: unknown): ModeInForceWords | undefin
 
 function becauseSentence(why: DecisionModelUnreadyReason): string {
   switch (why.kind) {
+    case 'selected': return 'decision models are switched off';
     case 'not-set': return 'no decision model is set up';
     case 'uncalibrated': return 'Jev\'s decisions have not been measured on your decision model yet';
     case 'failing': return `the decision model ${why.model} is not answering (${why.what})`;

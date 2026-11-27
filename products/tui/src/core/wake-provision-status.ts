@@ -5,11 +5,11 @@ import { createWakeProvisionPresentation } from '@goodvibes/engine/terminal-shel
 //
 // The wake models are checksum-pinned and arrive WITH THE INSTALLATION: the
 // installer and the npm postinstall provision them, and a daemon retries at boot
-// whatever the install could not fetch. `/voice wake-setup` is the recovery act
+// whatever the install could not fetch. "Set up the wake word" (System, Voice) is the recovery act
 // for the case where that did not land, not the normal way in, so the lines
 // below name it where it helps and do not imply it is a required step.
 //
-// This module is the read-only projection the /voice wake surfaces render from:
+// This module is the read-only projection the wake-word surfaces (System, Voice) render from:
 // per-artifact present / verified / corrupt / bytes taken straight from the platform's
 // wakeProvisionStatus, which verifies by CONTENT rather than by existence, a
 // truncated or wrong-asset file reports corrupt instead of present, because a
@@ -28,7 +28,7 @@ import { formatVoiceBytes } from './voice-provision-status.ts';
  * What a terminal can actually do, so a `voice.wake.*` row is refused or reported
  * rather than faked. Lives here, beside the status projection and away from the
  * inference runtime, so the command layer can resolve settings without pulling
- * onnxruntime into a `/voice wake-status` call.
+ * onnxruntime into the "See wake-word detection" call.
  */
 export function terminalWakeCapabilities(status?: Pick<WakeProvisionStatus, 'vadReady'>): WakeSurfaceCapabilities {
   return {
@@ -59,9 +59,9 @@ export function terminalWakeCapabilities(status?: Pick<WakeProvisionStatus, 'vad
 
 /** Limitations: the detector runs, with one row not in force, and says which. */
 
-/** The `/voice wake-status` block. */
+/** The "See wake-word detection" block. */
 
-/** The `/voice wake-setup` receipt. */
+/** The "Set up the wake word" receipt. */
 
 /** The one-line announcement printed before a (multi-megabyte) provision runs. */
 export const WAKE_SETUP_ANNOUNCEMENT = [

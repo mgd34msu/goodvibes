@@ -83,12 +83,13 @@ function rememberedCallerKey(runsAs: GateCaller | undefined): string {
  * Who asked, as the owner reads it on the question and Jev is told it: a sign-in by its user name, a paired device by
  * its name, the operator token as a program using it. `pairingTokens` and `users` are read in memory; no I/O.
  */
-function callerName(runsAs: GateCaller | undefined, runtime: GateRuntime, users: CallerUsers | undefined): string | undefined {
+function callerName(runsAs: GateCaller | undefined, runtime: GateRuntime, _users: CallerUsers | undefined): string | undefined {
   const principalId = runsAs?.principalId;
   if (!principalId) return undefined;
-  // A sign-in first, by its kind: a user name that reads like another credential's id is still a user's.
+  // A sign-in first, by its kind: a user name that reads like another credential's id is still a user's. Every sign-in is the
+  // user (one user, whatever name it signs in under), so the card never names one of them as someone else.
   if (isSignIn(runsAs)) {
-    return users?.ownerUsername?.() === principalId ? `you, signed in as ${principalId}` : `${principalId}, signed in`;
+    return `you, signed in as ${principalId}`;
   }
   if (principalId === LOCAL_OWNER_PRINCIPAL) {
     // A command line (`do`): decided whoever typed it, since anything that drives a terminal can type there.

@@ -167,7 +167,7 @@ export function artifactReferences(contractId: string, paths: readonly string[])
  * state beside the goal, so an expectation built from `judgeState` alone never equalled what was recorded and every
  * settlement with a decision model failed its provenance check.
  */
-function unitJudgeState(unit: ContractUnit, evidence: Parameters<typeof judgeState>[1]): Record<string, unknown> {
+export function unitJudgeState(unit: ContractUnit, evidence: Parameters<typeof judgeState>[1]): Record<string, unknown> {
   const judged = judgeState(unit, evidence);
   return JSON.parse(JSON.stringify({ goal: unit.goal, criteria: unit.criteria.filter(criterion => criterion.disposition === 'judged').map(criterion => criterion.text),
     output: judged['output'], ...(judged['evidence'] === undefined ? {} : { evidence: judged['evidence'] }) })) as Record<string, unknown>;

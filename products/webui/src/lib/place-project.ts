@@ -132,11 +132,13 @@ export interface PlaceProjects {
   readonly reason?: string | undefined;
 }
 
-/** Whether a frame of the workspace domain says a project was added or let go (a `workspaces.*` capability ran). */
+/** Whether a frame of the workspace domain says a project was added or let go (the `workspaces` list changed, or a `workspaces.*` capability ran). */
 function changesProjects(frame: unknown): boolean {
   const outer = (typeof frame === 'object' && frame !== null ? frame : {}) as { type?: unknown; list?: unknown; id?: unknown; payload?: unknown };
   const inner = (typeof outer.payload === 'object' && outer.payload !== null ? outer.payload : {}) as { type?: unknown; list?: unknown; id?: unknown };
   for (const event of [inner, outer]) {
+    // A folder registered or let go by any program, screen or script announces its own list.
+    if (event.type === 'LIST_CHANGED' && event.list === 'workspaces') return true;
     if (event.type === 'LIST_CHANGED' && event.list === 'capabilities' && typeof event.id === 'string') return event.id.startsWith('workspaces.');
   }
   return false;

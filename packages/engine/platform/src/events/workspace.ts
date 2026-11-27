@@ -20,6 +20,8 @@ export type WorkspaceEvent =
       list: 'memory' | 'checkpoints' | 'ci-watches' | 'check-ins' | 'people'
         | 'mail' | 'calendar' | 'dates' | 'paired-devices' | 'telegram-intake' | 'voice' | 'tailscale' | 'relay'
         | 'remote-runners'
+        // Projects: a folder was registered as a project or let go; a project chooser reads the list again.
+        | 'workspaces'
         // Work and agents: a research run or a research source changed, or work was handed to the terminal app.
         | 'research' | 'handed-off'
         // The hook trace: a hook ran in any program.

@@ -23,7 +23,7 @@ export function cliDecisionModelFacts(config: Pick<ConfigManager, 'get'>, env: R
   try { policy = parseDecisionModelPolicy(config.get('judgment.policy')); }
   catch { policy = DEFAULT_DECISION_MODEL_POLICY; }
   const set = decisionModelSet(decisionModelSettings(key => config.get(key)), env);
-  const reason = set ? null : 'not-set' as const;
+  const reason = policy === 'No Decision Model' ? 'selected' as const : set ? null : 'not-set' as const;
   const use = decisionModelUse({ policy, operation: reason === null ? 'decision' : 'no-decision-model', reason, revision: 0 });
   return { policy, policyLabel: decisionModelPolicyLabel(policy), set, inUse: use.inUse, line: use.line };
 }

@@ -243,7 +243,7 @@ export function createSettingsJudgmentPort(source: JudgmentSettingsSource): Judg
 
 /**
  * Whether a decision model can be asked now, and when not, the one thing missing.
- * `missing` says which: `key`
+ * `missing` says which: `policy` (judgment.policy is No Decision Model), `key`
  * (the key the settings name is not there: `keySource`/`keyName` say where it
  * was looked for), `store` (the secret store could not be read), or `rejected`
  * (only with a check: the decision model answered the one request with an error).
@@ -253,14 +253,14 @@ export type DecisionModelReadiness =
   | { readonly usable: true; readonly endpoint: string; readonly model: string; readonly checked: boolean }
   | {
     readonly usable: false; readonly endpoint: string; readonly model: string;
-    readonly missing: 'key' | 'store' | 'rejected';
+    readonly missing: 'policy' | 'key' | 'store' | 'rejected';
     readonly keySource: JudgmentKeySource; readonly keyName: string;
     readonly sentence: string;
   };
 
 /**
  * Says whether a decision model is usable now, from the live settings: the
- * primary target's key where `judgment.keySource` says it is
+ * policy, then the primary target's key where `judgment.keySource` says it is
  * (an environment variable, the secret store, or none needed), then, when that
  * key is missing, any fallback target whose key is there. Reads only local
  * state; with `check` it also sends one request to the resolved model and
@@ -274,8 +274,11 @@ export async function decisionModelReadiness(
   const model = settingsModel(source);
   const keySource = (source.config.get('judgment.keySource') ?? 'env') as JudgmentKeySource;
   const keyName = text(source.config.get('judgment.keyName')) || JUDGMENT_KEY_NAME;
-  const missing = (kind: 'key' | 'store' | 'rejected', sentence: string): DecisionModelReadiness =>
+  const missing = (kind: 'policy' | 'key' | 'store' | 'rejected', sentence: string): DecisionModelReadiness =>
     ({ usable: false, endpoint, model, missing: kind, keySource, keyName, sentence });
+  if (source.config.get('judgment.policy') === 'No Decision Model') {
+    return missing('policy', 'No decision model is used: "When the decision model is missing or fails" (judgment.policy) is set to No Decision Model.');
+  }
   const present = async (where: JudgmentKeySource, name: string): Promise<boolean> => {
     if (where === 'none') return true;
     if (where === 'env') return text(source.env[name]) !== '';

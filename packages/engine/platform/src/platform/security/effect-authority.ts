@@ -383,7 +383,9 @@ function admitOne(actor: Actor, rule: EffectRule, subject: { readonly owners: re
       return refused(rule, 'MISSING_RIGHT', rule.scope, `the credential does not hold ${rule.scope}`,
         `Use a credential that holds ${rule.scope}, or an admin session.`);
     }
-    if (rule.subject === 'own' && rank >= RANK.member && subject !== undefined && !subject.owners.includes(actor.id)) {
+    // Only a channel guest is held to the subjects it owns. Every other credential (a paired device, a sign-in) is the user's:
+    // another credential's session or record is theirs too, and only the stored scope list (above) limits it.
+    if (rule.subject === 'own' && actor.class === 'guest' && subject !== undefined && !subject.owners.includes(actor.id)) {
       return refused(rule, 'NOT_YOURS', 'owner of the subject', `${rule.id} acts on something ${actor.id} does not own`,
         'Ask its owner to share it with you.');
     }

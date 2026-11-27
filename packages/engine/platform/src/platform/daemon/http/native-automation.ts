@@ -26,7 +26,8 @@ function refuseChannelDelivery(body: Record<string, unknown>, context: { readonl
   const throughChannels = delivery.mode === 'surface' || delivery.mode === 'integration'
     || targets.some((target) => isRecord(target) && (target.kind === 'surface' || target.kind === 'integration'));
   if (!throughChannels) return;
-  if (sharedKindReached({ ownersOwn: false, daemonTurn: false, othersInput: false, principalId: context.principalId }, 'channels')) return;
+  // Every credential of the user reaches the user's own channels (no gift of a kind is asked): only its stored scope list limits it.
+  if (sharedKindReached({ ownersOwn: true, daemonTurn: false, othersInput: false, principalId: context.principalId }, 'channels')) return;
   throw new GatewayVerbError(`Not done: its answer would be delivered through ${sharedKindRefusalWords('channels', false)}. Nothing was kept.`, 'SHARED_KIND_NOT_GIVEN', 403, 'delivery');
 }
 

@@ -100,6 +100,7 @@ export const TEMPLATE_USE: CapabilityDefinition<TemplateSessionCapabilityService
   actionId: 'use', label: 'Use a template as your next message', word: 'use',
   inputs: [TEMPLATE, { id: 'fill', label: 'Blanks', help: 'Values for its blanks, as name=value pairs', kind: 'text', freeTextReason: 'name=value pairs', required: { default: '', defaultMeans: 'blanks left as they are' }, typed: { tail: true } }],
   sentence: 'Template {template}, its blanks filled in, is sent as your next message.', done: '',
+  doneInPlace: 'The template, its blanks filled in, was sent as your next message.',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { template: 'review-pr', fill: 'pr=123' },
   async run(values, services) {
     const templates = templateSessionOf(services);

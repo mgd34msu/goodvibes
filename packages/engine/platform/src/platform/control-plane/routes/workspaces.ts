@@ -20,6 +20,7 @@ import { readInvocationParams, requireStringValue } from './invocation-params.js
 import { attachHandler } from './attach-handler.js';
 import { currentRecordReach } from '@goodvibes/engine/daemon-api';
 import { folderReach } from '../../workspace/folder-reach.js';
+import { noteListChanged } from '../../runtime/list-changes.js';
 
 /** The subset of the store the verb handlers need. */
 export type WorkspacesGatewayService = Pick<
@@ -99,6 +100,8 @@ function createAddHandler(service: WorkspacesGatewayService): GatewayMethodHandl
       const result = await service.add(root, Object.keys(opts).length > 0 ? opts : undefined);
       // A re-registration that granted native scope changed something; the caller
       // told to register again needs to see that the step worked.
+      // Whoever registered it (a program, a screen, a script), every project chooser reads the list again.
+      if (!result.alreadyRegistered || result.nativeScopeGranted === true) noteListChanged({ list: 'workspaces', change: result.alreadyRegistered ? 'changed' : 'created' });
       return { workspace: result.record, alreadyRegistered: result.alreadyRegistered, nativeScopeGranted: result.nativeScopeGranted === true };
     } catch (error) {
       rethrowAsVerbError(error);
@@ -111,7 +114,9 @@ function createRemoveHandler(service: WorkspacesGatewayService): GatewayMethodHa
     const params = readInvocationParams(invocation);
     const root = requireStringValue(params.root, 'root');
     try {
-      return await service.remove(root);
+      const removed = await service.remove(root);
+      noteListChanged({ list: 'workspaces', change: 'deleted' });
+      return removed;
     } catch (error) {
       rethrowAsVerbError(error);
     }

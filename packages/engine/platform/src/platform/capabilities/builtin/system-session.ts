@@ -125,6 +125,7 @@ export const SYSTEM_QUIT: CapabilityDefinition<SystemSessionServices> = {
   capability: { id: 'system.quit', group: 'system', home: 'session', repeat: 'safe' },
   actionId: 'quit', label: 'Close this program', word: '', inputs: [],
   sentence: 'This program closes; work the daemon runs goes on without it.', done: '',
+  doneInPlace: 'This program is closing; work the daemon runs goes on without it.',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none',
   ownerOnly: { reason: 'it closes the program you are using', instead: 'Say that the work is done; the owner closes the program.' },
   example: {},
@@ -262,6 +263,7 @@ export const VOICE_SPEAK: CapabilityDefinition<SystemSessionServices> = {
   actionId: 'speak', label: 'Ask and hear the answer spoken', word: 'speak',
   inputs: [{ id: 'prompt', label: 'Message', help: 'What to ask', kind: 'long-text', freeTextReason: 'your own words', required: true, typed: { tail: true } }],
   sentence: '{prompt} is sent as a message and the answer is played aloud.', done: '',
+  doneInPlace: 'The message was sent; its answer will be played aloud.',
   touches: 'another-machine', lasts: 'not-a-change', risk: 'none', example: { prompt: 'summarise the last change' },
   async run(values, services) {
     const speech = speechOf(services);

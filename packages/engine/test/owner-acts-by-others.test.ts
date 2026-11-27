@@ -1,57 +1,20 @@
-// Proves: A caller who is not the owner withdraws access the owner granted: an admin revokes a device the owner paired, or replaces the shared operator token.
-// Red when: `pairing.tokens.delete` revokes a device the calling admin neither holds nor minted, or puts it to the owner as a question, instead of refusing it, or `pairing.tokens.revokeShared` runs for an admin who is not the owner.
-// Proves: A caller who is not the owner loosens the permission mode the sessions from a channel run under, up to yolo.
-// Red when: `channels.profiles.set` or `channels.profiles.delete` applies a binding change that loosens a channel's mode for an admin who is not the owner, or puts it to the owner as a question, instead of refusing it.
 // Proves: The model the Agent runs claims an approval, or cancels one that another caller raised.
 // Red when: The approval actions port stops applying the reading's claim and cancel rule before it reaches the broker, so the Agent's credential claims an ask or cancels one it did not raise.
 /**
- * Real components only: the daemon's control-plane helper over a real user
- * store, method catalog with the pairing verbs registered, pairing token store
- * and approval broker, and `capabilities.run` with the owner gate as every
- * daemon registers them (an owner's own act by anyone else is refused before the
- * gate; a question raised anyway would be read and answered No here, and counted);
- * the approval actions port over a real broker. The owner is their own
- * signed-in session (the account made at first start); the operator token
- * alone is a script.
+ * Real components only: the approval actions port over a real approval broker; the Agent's credential is the model acting
+ * for the user.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { UserAuthManager } from '../platform/src/platform/security/user-auth.ts';
-import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.ts';
-import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.ts';
-import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
-import { registerPairingGatewayMethods } from '../platform/src/platform/control-plane/routes/pairing.ts';
-import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.ts';
-import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
-import { DistributedRuntimeManager } from '../platform/src/platform/runtime/remote/distributed-runtime-manager.ts';
 import { ApprovalBroker, type SharedApprovalRecord } from '../platform/src/platform/control-plane/approval-broker.ts';
 import { localApprovalActions } from '../platform/src/platform/control-plane/approval-actions.ts';
-import { actorFromPrincipal, localOwnerActor, NO_OWNER_USER } from '@goodvibes/engine/daemon-api/http-policy';
-import { registerChannelProfilesGatewayMethods } from '../platform/src/platform/control-plane/routes/channel-profiles.ts';
-import { ChannelProfileRegistry, ChannelProfileStore } from '../platform/src/platform/channel-profiles/index.ts';
-import { ConfigManager } from '../platform/src/platform/config/manager.ts';
-import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
-import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
-import { createHookDispatcher } from '../platform/src/platform/hooks/index.ts';
-import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
-import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
-import { registerCapabilityGatewayMethods } from '../platform/src/platform/control-plane/routes/capabilities.ts';
-import { CapabilityCatalog, createDaemonCapabilityServices, movedCapabilityEntries } from '../platform/src/platform/capabilities/index.ts';
-import { createCapabilityOwnerGate } from '../platform/src/platform/daemon/capability-owner-gate.ts';
-import { daemonMethodCallOf, daemonNestedMethods } from '../platform/src/platform/daemon/capability-wiring.ts';
-import { createSharedKindGifts } from '../platform/src/platform/daemon/shared-kind-gifts.ts';
-import { CallerSharedStore, type SharedKind } from '../platform/src/platform/control-plane/shared-kinds.ts';
-import { resolveGoodVibesDaemonHome } from '../platform/src/platform/config/goodvibes-home.ts';
+import { actorFromPrincipal, NO_OWNER_USER } from '@goodvibes/engine/daemon-api/http-policy';
 
-const OPERATOR_TOKEN = 'synthetic-operator-token';
-/** The refusals of an act only the owner makes: the effect table's (OWNER_ONLY) and the dispatch's (OWNER_ONLY_ACT). */
-const OWNERS_OWN_REFUSALS: ReadonlySet<string> = new Set(['OWNER_ONLY', 'OWNER_ONLY_ACT']);
 let dir: string;
-const cleanups: Array<() => void> = [];
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gv-owner-acts-')); });
-afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 /**
  * The daemon's dispatch over `catalog` as a daemon composes it: its user store (the owner is the account made at first

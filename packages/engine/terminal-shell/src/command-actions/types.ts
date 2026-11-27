@@ -210,4 +210,9 @@ export interface CommandActionContext extends ConfirmationHost {
   readonly pushSurfaceModal?: ((modal: SurfaceModal) => void) | undefined;
   /** Open a place of this program by id (a command's `opens`); absent where the surface has no places. */
   readonly openPlace?: ((placeId: string, start?: { readonly list?: string | undefined }) => void) | undefined;
+  /**
+   * Where a value the person must see once goes (a session capability that declares `reveals`): the place's reveal pane.
+   * Absent where no pane can show it (a typed line, a model's call): the value is then not shown, and the words say so.
+   */
+  readonly reveal?: ((shown: { readonly label: string; readonly note: string; readonly value: string; readonly qr?: string | undefined }) => void) | undefined;
 }

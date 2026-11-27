@@ -25,6 +25,13 @@ export interface MethodCapabilityDefinition extends Omit<CapabilityDefinition<ne
    * definition's line (outcome.ts `riskDoneLine`).
    */
   readonly did?: ((answer: Readonly<Record<string, unknown>>, values: ActionValues) => string | undefined) | undefined;
+  /**
+   * A value in the method's answer that the person must see once (the definition's `reveals` names it): given to the
+   * reveal pane and never to the words, the data or a log. Absent: the answer carries none.
+   */
+  readonly reveal?: ((answer: Readonly<Record<string, unknown>>, values: ActionValues) => { readonly value: string; readonly qr?: string | undefined } | undefined) | undefined;
+  /** The fields of the method's answer that are that value: taken out of the result's data, which a script, a model and a log keep. */
+  readonly oneTime?: readonly string[] | undefined;
 }
 
 /** The catalog entry of a capability that runs through its own method. */

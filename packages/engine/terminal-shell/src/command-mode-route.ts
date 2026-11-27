@@ -59,6 +59,17 @@ export interface CommandRouteState<Context extends CommandRouteContext> {
 const COMMAND_LINE_CURSOR_KEYS: readonly string[] = ['left', 'right', 'home', 'end'];
 
 /**
+ * What a person reads when a line that begins with `/` names no command (typed in command mode, or pasted whole): the line
+ * is never sent to a model. `/secrets` is told where secrets are set now.
+ */
+export function unknownCommandMessage(name: string): string {
+  if (name.toLowerCase() === 'secrets') {
+    return 'There is no /secrets command: nothing was stored and nothing was sent. Secrets are set in the menu (the leader key, Ctrl+G unless you changed it, then m), in Safety, under Secrets, "store one".';
+  }
+  return `Unknown command: /${name}. Type /help for the commands; everything else is in the menu (the leader key, Ctrl+G unless you changed it, then m).`;
+}
+
+/**
  * What a person reads when a slash command fails: a refusal reads as its reason
  * and next step, any other error as the command's failure, never as a crash.
  */
@@ -167,7 +178,7 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
                 state.conversationManager?.log(`The skill /${name} was found, but this surface cannot send it as a message.`, { fg: activeTokens().error });
                 state.requestRender();
               } else {
-                state.conversationManager?.log(`Unknown command: /${name}. Type /help for the commands; everything else is in the menu (the leader key, Ctrl+G unless you changed it, then m).`, { fg: activeTokens().error });
+                state.conversationManager?.log(unknownCommandMessage(name), { fg: activeTokens().error });
                 state.requestRender();
               }
             }

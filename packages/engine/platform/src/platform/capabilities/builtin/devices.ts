@@ -30,6 +30,16 @@ function choose(id: string, label: string, help: string, list: ListName): InputD
   return { id, label, help, kind: 'choice', choices: { list }, required: true, typed: { position: 1 } };
 }
 
+// The reads below say what they found in sentences (`said`); the method's own answer stays the result's data for a script.
+type Answer = Readonly<Record<string, unknown>>;
+const rowsOf = (answer: Answer, key: string): readonly Answer[] => {
+  const found = answer[key];
+  return Array.isArray(found) ? found.filter((row): row is Answer => row !== null && typeof row === 'object' && !Array.isArray(row)) : [];
+};
+const wordOf = (row: Answer, key: string): string => { const value = row[key]; return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''; };
+const dayOf = (value: unknown): string => typeof value === 'number' && Number.isFinite(value) && value > 0 ? new Date(value).toISOString().slice(0, 16).replace('T', ' ') : 'never';
+const countOf = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`;
+
 const DEVICE = choose('device', 'Device', 'One of your paired devices (a phone, a tablet, a browser, an app)', DEVICE_TOKENS_LIST);
 const WAITING = 'The Waiting to pair tab of Devices and network lists the devices waiting to pair.';
 
@@ -37,7 +47,14 @@ export const DEVICES_LIST = throughMethod({
   id: 'devices.list', repeat: 'safe', actionId: 'list', label: 'See your paired devices', word: 'list', inputs: [],
   sentence: 'Lists each paired device with when it was paired and last seen, and whether the old shared token still works.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
-}, { id: 'pairing.tokens.list', fields: {} });
+}, { id: 'pairing.tokens.list', fields: {} },
+(answer) => {
+  const tokens = rowsOf(answer, 'tokens');
+  const shared = answer.legacySharedRevoked === true ? 'The old shared token is retired.' : 'The old shared token still works.';
+  if (tokens.length === 0) return `No device is paired. ${shared}`;
+  const lines = tokens.map((token) => `  ${wordOf(token, 'name') || 'unnamed'}  ·  paired ${dayOf(token.createdAt)}  ·  last seen ${dayOf(token.lastSeenAt)}  ·  ${shortId(wordOf(token, 'id'))}`);
+  return [`${countOf(tokens.length, 'paired device', 'paired devices')}:`, ...lines, shared].join('\n');
+});
 
 export const DEVICES_RENAME = throughMethod({
   id: 'devices.rename', repeat: 'safe', actionId: 'rename', label: 'Rename a device', word: 'rename',
@@ -70,7 +87,13 @@ export const DEVICES_RELAY_CODES = throughMethod({
   id: 'devices.relay-codes', repeat: 'safe', actionId: 'relay-codes', label: 'See devices paired through the relay', word: 'relay-codes', inputs: [],
   sentence: 'Lists each relay code, one per device paired through the relay, with when it was last used.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
-}, { id: 'relay.codes.list', fields: {} });
+}, { id: 'relay.codes.list', fields: {} },
+(answer) => {
+  const codes = rowsOf(answer, 'codes');
+  if (codes.length === 0) return 'No device is paired through the relay.';
+  return [`${countOf(codes.length, 'device is', 'devices are')} paired through the relay:`,
+    ...codes.map((code) => `  ${wordOf(code, 'name') || 'unnamed'}  ·  paired ${dayOf(code.createdAt)}  ·  last used ${dayOf(code.lastSeenAt)}  ·  ${shortId(wordOf(code, 'id'))}`)].join('\n');
+});
 
 export const DEVICES_RELAY_REVOKE = throughMethod({
   id: 'devices.relay-revoke', repeat: 'safe', actionId: 'relay-revoke', label: 'Cut a device off the relay', word: 'relay-revoke',
@@ -83,7 +106,15 @@ export const DEVICES_REQUESTS = throughMethod({
   id: 'devices.requests', repeat: 'safe', actionId: 'requests', label: 'See devices waiting to pair', word: 'requests', inputs: [],
   sentence: 'Lists each phone or other machine\'s daemon that asked to pair and waits for your approval, with what it offers, the name it pairs as and the address it asked from.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
-}, { id: 'remote.pair.requests.list', fields: {} });
+}, { id: 'remote.pair.requests.list', fields: {} },
+(answer) => {
+  const requests = rowsOf(answer, 'requests');
+  if (requests.length === 0) return 'No device is waiting to pair.';
+  return [`${countOf(requests.length, 'device is', 'devices are')} waiting to pair:`, ...requests.map((request) => {
+    const offers = Array.isArray(request.capabilities) ? request.capabilities.filter((entry): entry is string => typeof entry === 'string') : [];
+    return `  ${wordOf(request, 'label') || wordOf(request, 'id')}  ·  pairs as ${wordOf(request, 'requestedId') || 'not said'}  ·  offers ${offers.length > 0 ? offers.join(', ') : 'nothing yet'}  ·  asked ${dayOf(request.createdAt)}  ·  ${wordOf(request, 'id')}`;
+  })].join('\n');
+});
 
 export const DEVICES_APPROVE = throughMethod({
   id: 'devices.approve', repeat: 'safe', actionId: 'approve', label: 'Approve a device waiting to pair', word: 'approve',
@@ -112,7 +143,16 @@ export const DEVICES_NODES = throughMethod({
   id: 'devices.nodes', repeat: 'safe', actionId: 'nodes', label: 'See phones paired as device nodes', word: 'nodes', inputs: [],
   sentence: 'Lists each phone paired as a device node and what it can serve (camera, location, clipboard, notifications).', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
-}, { id: 'devices.nodes.list', fields: {} });
+}, { id: 'devices.nodes.list', fields: {} },
+(answer) => {
+  const nodes = rowsOf(answer, 'nodes');
+  if (nodes.length === 0) return 'No phone is paired as a device node.';
+  return [`${countOf(nodes.length, 'phone is', 'phones are')} paired as a device node:`, ...nodes.map((node) => {
+    const serves = Array.isArray(node.supported) ? node.supported.filter((entry): entry is string => typeof entry === 'string') : [];
+    const device = [wordOf(node, 'nodeKindLabel'), wordOf(node, 'platform')].filter(Boolean).join(', ');
+    return `  ${wordOf(node, 'label') || wordOf(node, 'nodeId')}${device ? `  ·  ${device}` : ''}  ·  can serve ${serves.length > 0 ? serves.join(', ') : 'nothing yet'}`;
+  })].join('\n');
+});
 
 export const DEVICES_REVOKE_GRANT = throughMethod({
   id: 'devices.revoke-grant', repeat: 'safe', actionId: 'revoke-grant', label: 'Revoke an always-allow grant', word: 'revoke-grant',
@@ -126,7 +166,15 @@ export const DEVICES_CAPTURES = throughMethod({
   id: 'devices.captures', repeat: 'safe', actionId: 'captures', label: 'See captures the daemon keeps', word: 'captures', inputs: [],
   sentence: 'Lists the photos and screen captures from your phones the daemon is keeping, and when each is deleted.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
-}, { id: 'devices.artifacts.list', fields: {} });
+}, { id: 'devices.artifacts.list', fields: {} },
+(answer) => {
+  const captures = rowsOf(answer, 'artifacts');
+  if (captures.length === 0) return 'The daemon keeps no capture from your devices.';
+  return [`The daemon keeps ${countOf(captures.length, 'capture', 'captures')}:`, ...captures.map((capture) => {
+    const bytes = typeof capture.byteLength === 'number' && Number.isFinite(capture.byteLength) ? `${Math.max(1, Math.round(capture.byteLength / 1024))} KB` : 'size not said';
+    return `  ${wordOf(capture, 'kind') || wordOf(capture, 'capabilityId') || 'capture'} from ${wordOf(capture, 'nodeId') || 'a device'}  ·  taken ${dayOf(capture.capturedAt)}  ·  ${bytes}  ·  deleted by itself ${dayOf(capture.expiresAt)}  ·  ${wordOf(capture, 'artifactId')}`;
+  })].join('\n');
+});
 
 export const DEVICES_DELETE_CAPTURE = throughMethod({
   id: 'devices.delete-capture', repeat: 'safe', actionId: 'delete-capture', label: 'Delete a capture now', word: 'delete-capture',

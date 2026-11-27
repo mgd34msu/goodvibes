@@ -13,7 +13,7 @@
  */
 import type { DevicesClient } from '@goodvibes/engine/platform/platform/runtime/client';
 import { formatDeviceLine, type PublicPairingToken } from '@goodvibes/engine/platform/platform/pairing';
-import type { DevicesSessionServices, PairHostRequest } from '@goodvibes/engine/platform/platform/capabilities';
+import type { DevicesSessionServices, PairHostRequest, PairingAnswer } from '@goodvibes/engine/platform/platform/capabilities';
 import { commandRefusal } from './command-confirmation.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
 import { runDaemonCapability, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
@@ -157,9 +157,10 @@ defineList<unknown>({
 
 /** How one app pairs on its own screen and keeps its own credential for its daemon (each piece it has). */
 export interface DevicesPairingHost<Ctx> {
-  readonly pairDevice: (ctx: Ctx, name: string) => Promise<string | void>;
+  /** A phone's or another device's pairing: its words, and its link and QR code as the answer's one-time `reveal` (never in the words). */
+  readonly pairDevice: (ctx: Ctx, name: string) => Promise<string | void | PairingAnswer>;
   readonly pairHost?: ((ctx: Ctx, request: PairHostRequest) => Promise<string | void>) | undefined;
-  readonly pairRelay?: ((ctx: Ctx, name: string) => Promise<string>) | undefined;
+  readonly pairRelay?: ((ctx: Ctx, name: string) => Promise<string | PairingAnswer>) | undefined;
   readonly pairChannel?: ((ctx: Ctx, channel: string) => Promise<string | void>) | undefined;
   readonly hostStatus?: ((ctx: Ctx) => Promise<string>) | undefined;
   readonly unpairHost?: ((ctx: Ctx) => Promise<string>) | undefined;

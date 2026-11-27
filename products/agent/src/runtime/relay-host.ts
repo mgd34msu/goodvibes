@@ -168,7 +168,7 @@ export async function mintRelayPairing(
 
 /** The pairing payload as text, or why there is none and what to do. */
 export function relayPairingOutcome(answer: RelayPairAnswer, words: RelayActionWords):
-  | { readonly ok: true; readonly pairing: RelayPairing; readonly text: string }
+  | { readonly ok: true; readonly pairing: RelayPairing; readonly text: string; readonly summary: string; readonly payload: string }
   | { readonly ok: false; readonly error: string; readonly next: string } {
   if (!answer.pairing) {
     return answer.status === 'disabled'
@@ -187,6 +187,16 @@ export function relayPairingOutcome(answer: RelayPairAnswer, words: RelayActionW
   return {
     ok: true,
     pairing,
+    // The words without the payload, for a screen that shows the payload once in its reveal pane (`payload`).
+    summary: [
+      'GoodVibes relay pairing (from the connected host)',
+      `  relay URL: ${pairing.relayUrl ?? '(not given)'}`,
+      `  rendezvous id: ${pairing.rid ?? '(not given)'}`,
+      ...(pairing.protocol ? [`  protocol: ${pairing.protocol}`] : []),
+      `  relay code: ${answer.codeName ?? 'this device'}${answer.codeId ? ` (${answer.codeId})` : ''}, for one device only; its payload is shown once, in the pane`,
+      `  ${words.codes} lists the devices; ${words.revoke} cuts one off the relay at its next request.`,
+    ].join('\n'),
+    payload: JSON.stringify(pairing),
     text: [
       'GoodVibes relay pairing (from the connected host)',
       `  relay URL: ${pairing.relayUrl ?? '(not given)'}`,

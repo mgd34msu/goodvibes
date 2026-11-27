@@ -71,19 +71,21 @@ export const NOTIFY_LIST: CapabilityDefinition<NotifyCapabilityServices> = {
   inputs: [{ id: 'show', label: 'Addresses', help: 'Each address carries its key, so only its site is shown unless you ask', kind: 'choice',
     choices: [{ value: 'no', label: 'Show only each site' }, { value: 'yes', label: 'Show the full addresses', risk: 'loosens-a-protection' }],
     required: { default: 'no', defaultMeans: 'only each site' }, typed: { flag: '--show', switchOn: 'yes' } }],
-  sentence: 'Lists the webhook addresses (ntfy and the like) your notifications and alerts are sent to, by number.', example: { show: 'no' },
+  sentence: 'Lists the webhook addresses (ntfy and the like) your notifications and alerts are sent to, by number; the full addresses, which carry their keys, are shown in the pane and not in the words.', example: { show: 'no' },
+  reveals: { label: 'Webhook addresses', note: 'Each address carries its key: it is shown here and not kept in the words of the answer. Ask again to see it again.' },
   async run(values, services) {
     const entries = services.notify.addresses();
     const full = values.show === 'yes';
     const urls = await Promise.all(entries.map((entry) => resolved(services, entry)));
-    const addresses = urls.map((url, index) => ({
-      number: index + 1, shown: shownNotificationWebhook(url), readable: url !== null, ...(full && url !== null ? { address: url } : {}),
-    }));
+    const addresses = urls.map((url, index) => ({ number: index + 1, shown: shownNotificationWebhook(url), readable: url !== null }));
     if (entries.length === 0) return { text: NONE_YET, data: { addresses } };
+    const complete = full ? urls.flatMap((url, index) => (url === null ? [] : [`${index + 1}. ${url}`])) : [];
     return {
       text: [`Notifications go to ${entries.length} address${entries.length === 1 ? '' : 'es'}:`,
-        ...addresses.map((entry) => `  ${entry.number}. ${entry.address ?? entry.shown}${entry.readable ? '' : ' (its stored address could not be read; nothing is sent to it)'}`)].join('\n'),
+        ...addresses.map((entry) => `  ${entry.number}. ${entry.shown}${entry.readable ? '' : ' (its stored address could not be read; nothing is sent to it)'}`),
+        ...(complete.length > 0 ? ['The full addresses are shown once, in the pane.'] : [])].join('\n'),
       data: { addresses },
+      ...(complete.length > 0 ? { reveal: { value: complete.join('\n') } } : {}),
     };
   },
 };

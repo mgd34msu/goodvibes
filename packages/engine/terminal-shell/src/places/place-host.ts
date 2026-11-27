@@ -363,11 +363,14 @@ export function createPlaceHost(options: PlaceHostOptions): PlaceHost {
         }
       }
       if (resolved.runsHere) {
-        // No slash command carries it: its action runs here, as the owner's own press.
+        // No slash command carries it: its action runs here, as the owner's own press. A value to see once (a session
+        // capability that declares `reveals`) is handed to this run's own pane, never to its lines.
+        const held: { shown?: CapabilityRevealed } = {};
+        const here: CommandActionContext = { ...context, reveal: (shown) => { held.shown = shown; } };
         try {
-          const said = await resolved.action.run(values, context as never);
+          const said = await resolved.action.run(values, here as never);
           const lines = typeof said === 'string' ? said.split('\n').filter((line) => line.trim() !== '') : [];
-          return { ok: true, lines };
+          return { ok: true, lines, ...(held.shown ? { reveal: held.shown } : {}) };
         } catch (error) {
           return { ok: false, reason: reasonOf(error) };
         }

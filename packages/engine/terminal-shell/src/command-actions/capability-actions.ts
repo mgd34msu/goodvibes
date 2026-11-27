@@ -197,6 +197,12 @@ export function sessionCapabilityAction<Ctx extends CommandActionContext, Servic
         throw error;
       }
       options.after?.(ctx, result);
+      // A value to see once goes to the reveal pane when this run has one, and is never in the words; a run with no pane
+      // (a typed line, a model) does not show it, and says where it is shown.
+      if (result.reveal && definition.reveals) {
+        if (ctx.reveal) ctx.reveal({ ...definition.reveals, value: result.reveal.value, ...(result.reveal.qr ? { qr: result.reveal.qr } : {}) });
+        else return `${result.text}\nThe ${definition.reveals.label.toLowerCase()} is shown only on a screen with a reveal pane: ${definition.label} in Devices and network.`;
+      }
       return result.text;
     },
   };

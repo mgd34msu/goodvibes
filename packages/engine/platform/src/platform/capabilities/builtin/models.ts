@@ -530,11 +530,14 @@ export const PROVIDER_SIGN_IN: MethodCapabilityDefinition = {
   sentence: 'A sign-in (log in) to {provider} with your subscription starts: you open the address it gives in a browser; once it finishes, the sign-in is kept for every program until you change it (signing out ends it).', done: '',
   touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'sign-out', example: { provider: 'openai' },
   method: { id: 'providers.subscription.signIn.begin', fields: { provider: 'provider' } },
+  // The sign-in address carries the sign-in's state: it is shown once, in the pane, and is not in the words or the data.
+  reveals: { label: 'Sign-in address', note: 'Open it in a browser to sign in. It is shown this once: start the sign-in again for a new address.' },
+  oneTime: ['authorizationUrl'],
+  reveal: (answer) => (text(answer['authorizationUrl']) ? { value: text(answer['authorizationUrl']) } : undefined),
   said: (answer, values) => {
     const finish = 'When the page shows a code (or an address), give it to Finish signing in on this provider.';
     return [
-      `Signing in to ${text(answer['provider']) || values.provider}. Open this address in a browser:`,
-      `  ${text(answer['authorizationUrl'])}`,
+      `Signing in to ${text(answer['provider']) || values.provider}. The sign-in address is shown once, in the pane: open it in a browser.`,
       ...(text(answer['listenerNote']) ? [text(answer['listenerNote'])] : []),
       answer['finishes'] === 'on-its-own' ? `A browser on the daemon's machine finishes it on its own. ${finish}` : finish,
     ].join('\n');

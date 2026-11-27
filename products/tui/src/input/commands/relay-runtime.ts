@@ -1,5 +1,6 @@
 import type { CommandContext } from '../command-registry.ts';
 import type { RelayCode } from '@goodvibes/engine/terminal-shell/devices-command';
+import type { PairingAnswer } from '@goodvibes/engine/platform/platform/capabilities';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { askToTurnOnRelay } from '@goodvibes/engine/terminal-shell/relay-pairing-ask';
 import { generateQrMatrix, renderQrToString } from '@goodvibes/engine/platform/platform/pairing/qr-generator';
@@ -18,7 +19,7 @@ function relayConfiguredUrl(ctx: CommandContext): string {
   return String(ctx.platform.configManager.get('relay.url') ?? '');
 }
 
-export async function pairRelay(ctx: CommandContext, name: string | undefined): Promise<string> {
+export async function pairRelay(ctx: CommandContext, name: string | undefined): Promise<PairingAnswer> {
   const configuredUrl = relayConfiguredUrl(ctx);
   const externalServices = ctx.platform.externalServices;
   if (!externalServices) throw commandRefusal('Relay pairing is unavailable: background service controller is not running in this build.');
@@ -44,16 +45,14 @@ export async function pairRelay(ctx: CommandContext, name: string | undefined): 
         : `Relay pairing could not be minted: the relay ${reading.status === 'refused' ? 'refused the daemon\'s registration' : 'registration did not succeed'} (state: ${reading.status}). The Relay tab of Devices and network says why.`);
   }
   const qrMatrix = generateQrMatrix(reading.minted.encoded);
-  return [
-    'Relay pairing payload (scan with a companion app, or copy the string below):',
-    '',
-    reading.minted.encoded,
-    '',
-    renderQrToString(qrMatrix),
-    '',
-    `It carries a relay code for one device${reading.minted.codeName ? `, "${reading.minted.codeName}"` : ''}${reading.minted.codeId ? ` (${reading.minted.codeId})` : ''}.`,
-    'Pair each device with its own code. The Relay tab of Devices and network lists them and cuts one device off the relay at its next request.',
-  ].join('\n');
+  // The payload carries the relay code: it and its QR code are shown once, in the reveal pane, never in these words.
+  return {
+    text: [
+      `A relay pairing payload was made for one device${reading.minted.codeName ? `, "${reading.minted.codeName}"` : ''}${reading.minted.codeId ? ` (${reading.minted.codeId})` : ''}: scan its QR code with a companion app, or copy it, from the pane.`,
+      'Pair each device with its own code. The Relay tab of Devices and network lists them and cuts one device off the relay at its next request.',
+    ].join('\n'),
+    reveal: { value: reading.minted.encoded, qr: renderQrToString(qrMatrix) },
+  };
 }
 
 export async function relayCodes(ctx: CommandContext): Promise<readonly RelayCode[]> {

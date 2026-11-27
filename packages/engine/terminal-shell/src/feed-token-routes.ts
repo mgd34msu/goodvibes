@@ -17,7 +17,7 @@ import { collectComposerBlocks, type ComposerMessage } from './input-content.js'
 import { commandHistoryLine } from './command-registry.js';
 import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import { splitSlashCommand } from './slash-command-parser.js';
-import { commandFailureMessage } from './command-mode-route.js';
+import { commandFailureMessage, unknownCommandMessage } from './command-mode-route.js';
 import { takeSplashEnterAction } from './first-run/splash-state.js';
 import type { NativeConversationInput } from './native/native-conversation-input.js';
 export interface FeedCommandContext {
@@ -394,9 +394,8 @@ export function createFeedTokenRoutes<
                 ? state.commandRegistry.executeFromOwner(name, args, state.commandContext, originalInput.text)
                 : executeCommand(name, args);
             void command.then((handled) => {
-              if (!handled) {
-                state.commandContext?.submitInput?.(text, undefined, { source: originalInput });
-              }
+              // A line that begins with `/` and names no command is never sent to a model: the person is told (as in command mode).
+              if (!handled) state.commandContext?.print(unknownCommandMessage(name));
               state.requestRender();
             }).catch((error: unknown) => {
               state.commandContext?.print(commandFailureMessage(name, error));

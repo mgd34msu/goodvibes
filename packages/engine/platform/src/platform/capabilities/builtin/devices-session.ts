@@ -8,7 +8,7 @@
  * a client reaching it, so these run in the program holding the conversation.
  * Their controls are in the Devices and network place.
  */
-import { CapabilityRefusal, type CapabilityDefinition, type ListName } from '../types.js';
+import { CapabilityRefusal, type CapabilityDefinition, type CapabilityResult, type ListName } from '../types.js';
 
 /**
  * A request to pair this program with its daemon: the one way a device becomes the owner's own. The owner starts it in person
@@ -22,12 +22,21 @@ export interface PairHostRequest {
   readonly code: string;
 }
 
+/**
+ * What pairing a device answers: its words, and the one-time link or code that signs the device in (with its QR code, when
+ * it has one). The value is shown once, in the reveal pane; it is never in the words.
+ */
+export interface PairingAnswer {
+  readonly text: string;
+  readonly reveal?: { readonly value: string; readonly qr?: string | undefined } | undefined;
+}
+
 /** This program's pairing: each piece it has; a piece it lacks is absent and refused in words. */
 export interface DevicesSessionServices {
   readonly pairing?: {
-    pairDevice(name: string): Promise<string | void>;
+    pairDevice(name: string): Promise<string | void | PairingAnswer>;
     readonly pairHost?: ((request: PairHostRequest) => Promise<string | void>) | undefined;
-    readonly pairRelay?: ((name: string) => Promise<string>) | undefined;
+    readonly pairRelay?: ((name: string) => Promise<string | PairingAnswer>) | undefined;
     readonly pairChannel?: ((channel: string) => Promise<string | void>) | undefined;
     readonly hostStatus?: (() => Promise<string>) | undefined;
     readonly unpairHost?: (() => Promise<string>) | undefined;
@@ -72,17 +81,23 @@ export const DEVICES_PAIR: CapabilityDefinition<DevicesSessionServices> = {
   sentence: 'The {what} you chose is paired and may reach the daemon, until you change it.', done: '',
   touches: 'credential', lasts: 'kept', risk: 'none',
   ownerOnly: { reason: 'pairing gives something new access to the daemon', instead: 'The Devices and network place lists what is paired.' },
+  // A phone's or a relay device's link and QR code sign it in: shown once in the pane, never in the words.
+  reveals: { label: 'Pairing link', note: 'Scan the QR code with the device, or open the link on it. The link signs one device in: it is shown this once here.' },
   example: { what: 'device' },
   async run(values, services) {
     const pairing = pairingOf(services);
     const name = values.name?.trim() ?? '';
-    if (values.what === 'device') return { text: (await pairing.pairDevice(name)) ?? '' };
+    const answered = (said: string | void | PairingAnswer, otherwise: string): CapabilityResult => {
+      if (said !== null && typeof said === 'object') return { text: said.text || otherwise, ...(said.reveal ? { reveal: said.reveal } : {}) };
+      return { text: said || otherwise };
+    };
+    if (values.what === 'device') return answered(await pairing.pairDevice(name), 'A pairing offer was made for a phone or another device.');
     if (values.what === 'host') {
-      return { text: (await piece(pairing, 'pairHost', 'Pairing this program with its daemon')({ name, code: values.code?.trim() ?? '' })) ?? '' };
+      return answered(await piece(pairing, 'pairHost', 'Pairing this program with its daemon')({ name, code: values.code?.trim() ?? '' }), 'This program is paired with its daemon.');
     }
-    if (values.what === 'relay') return { text: await piece(pairing, 'pairRelay', 'Pairing a device through the relay')(name) };
+    if (values.what === 'relay') return answered(await piece(pairing, 'pairRelay', 'Pairing a device through the relay')(name), 'A pairing code was made for a device through the relay.');
     if (!values.channel) throw new CapabilityRefusal('Name the channel to pair.', 'Choose the channel under Channel.');
-    return { text: (await piece(pairing, 'pairChannel', 'Setting up a channel')(values.channel)) ?? '' };
+    return answered(await piece(pairing, 'pairChannel', 'Setting up a channel')(values.channel), `Opened the row of ${values.channel} in Mail, calendar and channels, where its keys are entered.`);
   },
 };
 

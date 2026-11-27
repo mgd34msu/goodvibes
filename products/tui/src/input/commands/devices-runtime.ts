@@ -2,12 +2,12 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { PublicPairingToken } from '@goodvibes/engine/platform/platform/pairing';
 import { readConnectedDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 import { describeOperatorRpcError } from '../../runtime/client/operator-endpoint.ts';
-import { namePairingOffer } from '../../views/modals/pairing-modal.ts';
+import { buildPairingConnectionInfo, servePairingToNetwork } from '../../views/builtin-modals.ts';
+import { SERVE_TO_NETWORK_QUESTION, formatPairingOffers, generateQrMatrix, pairingPostureNotice, renderQrToString } from '@goodvibes/engine/platform/platform/pairing';
 import { getOperatorRpc } from './operator-rpc.ts';
 import { wireDevicesLists, type DeviceTokens, type DevicesPairingHost, type PairRequest, type PairRequestsHost } from '@goodvibes/engine/terminal-shell/devices-command';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
-import { openModalCommand } from './runtime-services.ts';
 import { capabilityBinding } from './capability-binding.ts';
 import { pairRelay, relayCodes } from './relay-runtime.ts';
 import { resolveNativeHostCredential } from '../../runtime/client/native-host-credential.ts';
@@ -108,10 +108,42 @@ function pairWithCodeWords(ctx: CommandContext): string {
  */
 export const TUI_PAIRING: DevicesPairingHost<CommandContext> = {
   async pairDevice(ctx, name) {
-    // The pairing view shows a QR of an offer, minted with the name given; the device takes that token when it uses it.
-    if (name) namePairingOffer(name);
-    openModalCommand(ctx, 'pairing-modal');
-    return name ? `Opened the pairing QR for "${name}"; the device is listed by that name once it pairs.` : 'Opened the pairing QR. Press r in it for a new offer; the one it replaces stops working unless a device already paired with it.';
+    // An offer is minted with the name given: its link and QR code are the answer's one-time reveal, shown in the place's
+    // reveal pane and never in the words. The device takes the offer when it uses it and is listed by that name once it pairs.
+    const pairingTokens = ctx.platform.pairingTokens;
+    if (!pairingTokens) throw commandRefusal('A device cannot be paired here: this program holds no store of pairing offers.');
+    const configManager = ctx.platform.configManager;
+    let info = buildPairingConnectionInfo({ configManager, pairingTokens }, { fresh: true, ...(name ? { name } : {}) });
+    if ('kind' in info) throw commandRefusal(info.lines.join('\n'));
+    // A link only this computer can open: the one real question, asked in place (opening on No); yes serves the web UI to the
+    // network and makes the code for an address phones can open in the same request.
+    if (info.thisMachineOnly && ctx.confirm) {
+      const serve = await ctx.confirm({
+        title: 'Serve GoodVibes to your network?',
+        body: `${SERVE_TO_NETWORK_QUESTION}\nPhones and other devices on your network could then open GoodVibes; each still needs a pairing code to sign in. It stays served to your network until you take it back.`,
+        confirmLabel: 'Serve it to my network',
+        cancelLabel: 'Keep it on this computer',
+        tone: 'warning',
+      });
+      if (serve) {
+        try {
+          info = await servePairingToNetwork({ configManager, homeDirectory: requireShellPaths(ctx).homeDirectory }, name || undefined);
+        } catch (error) {
+          throw commandRefusal(`The web UI was not served to your network: ${error instanceof Error ? error.message : String(error)}.`, 'Keep it on this computer, or check the daemon, then pair again.');
+        }
+      }
+    }
+    const here = info.thisMachineOnly;
+    const notice = pairingPostureNotice(info.posture);
+    return {
+      text: [
+        `A pairing offer named "${info.tokenName}" was made for ${info.url}; the device is listed by that name once it pairs.`,
+        ...(here ?? ['Scan its QR code with the phone\'s camera: it opens the web app already signed in.']),
+        ...(info.offers.length > 0 ? ['', 'Offers carried in this pairing (each declinable in the web app):', ...formatPairingOffers(info.offers)] : []),
+        ...(notice ? ['', notice] : []),
+      ].join('\n'),
+      reveal: { value: info.deepLink, ...(here ? {} : { qr: renderQrToString(generateQrMatrix(info.deepLink)) }) },
+    };
   },
   async pairHost(ctx, request) {
     // The one way a device becomes yours: you start it on your own screen and this terminal completes it with that code.

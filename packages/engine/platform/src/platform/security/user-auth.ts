@@ -1,5 +1,4 @@
 import type { AuthorityRecordFile } from '../cluster/authority-record-file.js';
-import { noteRefusedFromGroup } from '../cluster/refused-from-group.js';
 import { randomBytes, randomUUID, scrypt, scryptSync, timingSafeEqual } from 'crypto';
 import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
@@ -580,100 +579,22 @@ export class UserAuthManager {
     const conflicted = new Set(view.userConflicts().map((conflict) => conflict.username.toLowerCase()));
     for (const username of named) {
       if (conflicted.has(username.toLowerCase()) && local.has(username)) continue;
+      // Every machine of the group is the same user: an account arriving from another machine is taken exactly as it is
+      // in the record (as released in 3.5.0), whichever account it is. The owner mark (`owner`) is this machine's own
+      // fact and is kept on the account it is on.
       const current = next.get(username);
-      // The owner of this machine is never removed or narrowed from elsewhere: their account here stays theirs, and it
-      // takes from the record only a new password (the mark is this machine's fact, never the record's).
-      const owner = current?.owner === true;
-      // The owner's password stays in step across their machines only as their own recorded act (#ownerInStep, gate-review-6 G2):
-      // nothing of their account here is taken from an entry of their name.
-      if (owner) continue;
       const live = view.user(username);
       if (!live) { next.delete(username); continue; }
       const hash = live.private?.passwordHash;
       if (!hash) continue;
-      const roles = owner ? [...(current?.roles ?? [])] : [...live.public.roles];
-      const scopes = owner ? current?.scopes : live.public.scopes === null ? undefined : [...live.public.scopes];
+      const roles = [...live.public.roles];
+      const scopes = live.public.scopes === null ? undefined : [...live.public.scopes];
       if (current && current.passwordHash === hash && JSON.stringify(current.roles ?? []) === JSON.stringify(roles)
         && JSON.stringify(current.scopes) === JSON.stringify(scopes)) continue;
-      next.set(username, { username, passwordHash: hash, roles, ...(scopes !== undefined ? { scopes } : {}), ...(owner ? { owner: true as const } : {}) });
+      next.set(username, { username, passwordHash: hash, roles, ...(scopes !== undefined ? { scopes } : {}), ...(current?.owner === true ? { owner: true as const } : {}) });
     }
-    return this.#ownerInStep(view, next);
+    return next;
   }
-
-  /**
-   * The owner is the same person on each of their machines, so their password stays in step across the group: the latest
-   * password the owner set in person on any of them while in this group (a record version that records their own act there,
-   * `passwordByOwner`, made in this group, `setInGroup`, the highest revision) is their password here too; one set before
-   * the machines were in one group stays its machine's own. Whatever their account is named or numbered on each machine (each
-   * makes its own at its first start). Nothing else changes their password from the group: a version of their account that
-   * does not record their act is refused, logged and shown in the Machine group tab (gate-review-6 G2). The owner mark
-   * itself is never taken from the record.
-   */
-  #ownerInStep(view: NonNullable<ReturnType<AuthorityRecordFile['view']>>, users: Map<string, AuthUser>): Map<string, AuthUser> {
-    const owner = [...users.values()].find((user) => user.owner === true);
-    if (!owner) { this.#ownerPasswordFrom = undefined; return users; }
-    const self = this.#authority?.nodeId;
-    // Only an act made in this group carries across it: a password the owner set on a machine before it was in the group
-    // with this one (each machine's own first sign-in, before a join) is that machine's own, so a join changes no
-    // machine's password and signs nobody out; the next password the owner sets in person in the group is the group's.
-    const group = view.record.scope.groupId;
-    // A machine writes only its own entry for its owner (`owner-<its record id>`), and only on the owner's act there: a version
-    // of it written by any other machine, or one that does not record their act, is refused.
-    let latest: { readonly key: string; readonly rev: number; readonly at: number; readonly origin: string; readonly hash: string; readonly same: readonly string[] } | undefined;
-    let own: { readonly key: string; readonly same: readonly string[] } | undefined;
-    let ownValid = false;
-    let ownBroken = false;
-    for (const entry of view.list('user')) {
-      if (view.isRevoked(`user:${entry.id}`)) continue;
-      const hash = entry.private?.passwordHash;
-      if (!hash) continue;
-      const ownersEntry = entry.id.startsWith('owner-');
-      const writtenByItsMachine = ownersEntry && entry.id === `owner-${entry.origin}`;
-      if (ownersEntry && writtenByItsMachine && entry.private?.passwordByOwner === true) {
-        const key = `${entry.id}@${entry.rev}`;
-        const same = Array.isArray(entry.private.samePasswordAs) ? entry.private.samePasswordAs.filter((one): one is string => typeof one === 'string') : [];
-        if (entry.origin === self) { ownValid = true; own = { key, same }; }
-        if (group === null || entry.private.setInGroup !== group) continue;
-        const later = !latest || entry.rev > latest.rev || (entry.rev === latest.rev && (entry.at > latest.at || (entry.at === latest.at && entry.origin > latest.origin)));
-        if (later) latest = { key, rev: entry.rev, at: entry.at, origin: entry.origin, hash, same };
-        continue;
-      }
-      if (entry.id === `owner-${self}`) ownBroken = true;
-      if ((ownersEntry || entry.public.username === owner.username) && entry.origin !== self && hash !== owner.passwordHash) {
-        const what = `a new password for your account ${owner.username}`;
-        if (noteRefusedFromGroup(`user:${entry.id}@${entry.rev}`, { what, origin: entry.origin, at: this.nowFn() })) {
-          logger.warn('A new password for the owner\'s account arrived from another machine of the group without the owner\'s own act there; refused, the owner\'s password here is unchanged', { username: owner.username, from: entry.origin });
-        }
-      }
-    }
-    // This machine's own entry was written over from elsewhere: it is written again from the owner's account here (a later
-    // revision than the one that replaced it), and nothing from the group changes their password until it is.
-    // None yet (an account kept from before this record, at this machine's own upgrade, or before its first sign-in
-    // published one): the owner's account here is recorded once, as it is on this machine.
-    if (ownBroken || !ownValid) {
-      // Never the first-run generated password: it is no act of the owner's (their first sign-in sets their own, and publishes it).
-      if (!this.#ownerRepublishing && this.#authority !== undefined && owner.bootstrap === undefined) {
-        this.#ownerRepublishing = true;
-        queueMicrotask(() => { this.#ownerRepublishing = false; this.#publish(owner.username, 'upsert', false, { recordedOnly: true }); });
-      }
-      this.#ownerPasswordFrom = undefined;
-      return users;
-    }
-    if (!latest || latest.origin === self || latest.hash === owner.passwordHash) {
-      this.#ownerPasswordFrom = latest && latest.hash === owner.passwordHash ? latest : own;
-      return users;
-    }
-    this.#ownerPasswordFrom = latest;
-    return new Map(users).set(owner.username, { ...owner, passwordHash: latest.hash });
-  }
-
-  #ownerRepublishing = false;
-  /**
-   * The record version the owner's password in force here comes from (`owner-<machine>@<rev>`), with the versions its
-   * writer found to hold the same password (`samePasswordAs`). When the owner's password here takes another version's
-   * hash, their sessions end only when that version does not hold the same password as the one it replaces.
-   */
-  #ownerPasswordFrom: { readonly key: string; readonly same: readonly string[] } | undefined;
 
   /**
    * The owner, recorded once (`AuthUser.owner`). A store made before the mark existed has none: the account that is the
@@ -698,17 +619,13 @@ export class UserAuthManager {
 
   /** The record changed (here, in another process, or on another machine): take it in, ending sessions it made stale. */
   #applyRecord(): void {
-    const before = this.#ownerPasswordFrom;
     const next = this.#overlay(this.users);
-    const after = this.#ownerPasswordFrom;
     const changed = [...new Set([...this.users.keys(), ...next.keys()])]
       .filter((username) => !sameUser(this.users.get(username), next.get(username)));
     if (changed.length === 0) return;
-    // The owner's password here taken from a version that holds the same password as the one it replaces (the writer
-    // checked it against that version when the owner set it): a new hash of the same password, so no session ends.
-    const samePassword = (username: string): boolean => next.get(username)?.owner === true && before !== undefined && after !== undefined
-      && after.key !== before.key && after.same.includes(before.key);
-    const ended = changed.filter((username) => this.users.get(username)?.passwordHash !== next.get(username)?.passwordHash && !samePassword(username));
+    // As released: a user whose password hash changed has its sessions ended. A join changes no hash (each machine keeps
+    // its own account of a name it already holds, `userConflicts`), so a join ends no session.
+    const ended = changed.filter((username) => this.users.get(username)?.passwordHash !== next.get(username)?.passwordHash);
     const previous = this.users;
     this.users = next;
     this.#revision++;
@@ -744,45 +661,12 @@ export class UserAuthManager {
 
   /** Write a user change to the authority record; logged on failure, the change stands here. */
   #publish(username: string, change: 'upsert' | 'delete', narrows: boolean,
-    how: { readonly recordedOnly?: boolean; readonly sameAct?: boolean; readonly password?: string } = {}): void {
+    _how: { readonly recordedOnly?: boolean; readonly sameAct?: boolean; readonly password?: string } = {}): void {
     const authority = this.#authority;
     if (!authority) return;
     const user = this.users.get(username);
-    // The owner's account: each machine keeps one entry of its own for them (`owner-<this machine's record id>`), which
-    // carries their own password changes made here to their other machines (#ownerInStep); never conflicts with them.
-    if (user?.owner === true && change === 'upsert') {
-      // The first-run generated password is never the owner's act: nothing goes to the group until they set their own.
-      if (user.bootstrap === true) return;
-      const id = `owner-${authority.nodeId}`;
-      // With the password in hand (the owner setting it, or signing in with it), the versions of the owner's account on
-      // the record that hold the same password are named, so a machine that takes this version's hash in place of one of
-      // them ends no session (#applyRecord). A password check per machine of the group, only when the owner acts.
-      const samePasswordAs: string[] = [];
-      if (how.password !== undefined) {
-        for (const entry of authority.view()?.list('user') ?? []) {
-          const hash = entry.private?.passwordHash;
-          if (!entry.id.startsWith('owner-') || entry.private?.passwordByOwner !== true || !hash) continue;
-          if (verifyPassword(how.password, hash)) samePasswordAs.push(`${entry.id}@${entry.rev}`);
-        }
-      }
-      const work = authority.write((view) => {
-        const live = view.list('user').find((entry) => entry.id === id && !view.isRevoked(`user:${id}`));
-        // The group this act was made in; a version only recorded as it is here (no act of the owner's now) is made in none.
-        const setInGroup = how.recordedOnly === true ? null
-          : how.sameAct === true ? (live?.private?.setInGroup ?? null) : view.record.scope.groupId;
-        const privatePart = { passwordHash: user.passwordHash, passwordByOwner: true as const, setInGroup,
-          ...(samePasswordAs.length > 0 ? { samePasswordAs } : {}) };
-        if (live) {
-          return { kind: 'update', key: `user:${id}`, value: null, narrowsOrWidens: false,
-            patch: { username, roles: [...(user.roles ?? [])], scopes: null }, privatePart };
-        }
-        return { kind: 'issue', value: null, entries: [{ kind: 'user', id, audience: { nodeId: authority.nodeId },
-          public: { username, roles: [...(user.roles ?? [])], scopes: null, epoch: 1, createdAt: this.nowFn() }, private: privatePart }] };
-      }).then(() => undefined, (error: unknown) => logger.warn('A change of the owner\'s password could not be written to the authority record; it holds on this machine only until it is', { error: String(error) }));
-      this.#publishing.add(work);
-      void work.finally(() => this.#publishing.delete(work));
-      return;
-    }
+    // Every account is written the same way (as released in 3.5.0), the user's first account included: every machine of
+    // the group is the same user, so no account has an entry of its own or a record of "the owner's own act".
     const work = authority.write((view) => {
       // A name held by separate accounts on different machines: a change here
       // must not land on another machine's account. It stays on this machine.
@@ -796,11 +680,7 @@ export class UserAuthManager {
       }
       if (!user) return { kind: 'none', value: null };
       const scopes = user.scopes === undefined ? null : [...user.scopes];
-      // The owner's own account changes here only by their own act on this machine: their first sign-in setting their
-      // password, their sign-in (a stronger hash of the same password), or a rotation the owner's rule ran on their press or
-      // their yes (local_auth.users.password.rotate is the owner's own act; deleting or narrowing the owner is refused). That is
-      // recorded with the password, so their other machines take it as theirs (#overlay); no other version is taken there.
-      const privatePart = { passwordHash: user.passwordHash, ...(user.owner === true ? { passwordByOwner: true as const } : {}) };
+      const privatePart = { passwordHash: user.passwordHash };
       if (live) {
         return { kind: 'update', key: `user:${live.id}`, value: null, narrowsOrWidens: narrows,
           patch: { roles: [...(user.roles ?? [])], scopes, epoch: live.public.epoch + (narrows ? 1 : 0) },

@@ -40,7 +40,7 @@ interface PairingHandoffCreateResult {
 export type AgentDevicePairingOutcome =
   /** `forThisMachine`: the link opens only in a browser on the host's machine (a phone could not open it). */
   /** `qrShown`: the text carries a QR code of the link. */
-  | { readonly ok: true; readonly tokenName: string; readonly tokenId: string; readonly link: string; readonly forThisMachine: boolean; readonly qrShown: boolean; readonly text: string }
+  | { readonly ok: true; readonly tokenName: string; readonly tokenId: string; readonly link: string; readonly forThisMachine: boolean; readonly qrShown: boolean; readonly text: string; readonly qr?: string | undefined }
   /** `text`, when present, is the whole answer as the numbered list `pair` prints. */
   | { readonly ok: false; readonly error: string; readonly next: string; readonly text?: string };
 
@@ -156,6 +156,11 @@ export async function mintAgentDevicePairing(
      * still carries the real link (for a copy). The QR code is drawn as before.
      */
     readonly mask?: boolean | undefined;
+    /**
+     * Leave the QR code out of `text` and give it as `qr` instead: the QR code encodes the real link, so a caller that
+     * shows the link once (the reveal pane) keeps it out of the words.
+     */
+    readonly qrApart?: boolean | undefined;
   } = {},
 ): Promise<AgentDevicePairingOutcome> {
   const reach = verbs.probe();
@@ -202,7 +207,7 @@ export async function mintAgentDevicePairing(
   } else {
     // What is done and what is next, as one list; the code and its details follow.
     lines.push('Pair a phone', ...pairingReadySteps(result.posture?.origin ?? originOf(link), offerKinds));
-    if (qrShown) lines.push('', renderQrToString(generateQrMatrix(link)));
+    if (qrShown && options.qrApart !== true) lines.push('', renderQrToString(generateQrMatrix(link)));
     lines.push('', `  ${shownLink}`);
   }
   lines.push(`  Token name: ${result.token.name}  (rename or revoke it in the host's device list)`);
@@ -213,5 +218,8 @@ export async function mintAgentDevicePairing(
   if (capabilities.length > 0) lines.push('', 'This device will get:', ...capabilities);
   const notice = pairingPostureNotice(result.posture);
   if (notice) lines.push('', notice);
-  return { ok: true, tokenName: result.token.name, tokenId: result.token.id, link, forThisMachine: thisMachine !== undefined, qrShown, text: lines.join('\n') };
+  return {
+    ok: true, tokenName: result.token.name, tokenId: result.token.id, link, forThisMachine: thisMachine !== undefined, qrShown, text: lines.join('\n'),
+    ...(qrShown && options.qrApart === true ? { qr: renderQrToString(generateQrMatrix(link)) } : {}),
+  };
 }

@@ -62,7 +62,6 @@
  * same lock across their final authorization/launch boundary.
  */
 import type { AuthorityChange, AuthorityRecordFile } from '../cluster/authority-record-file.js';
-import { noteRefusedFromGroup } from '../cluster/refused-from-group.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
@@ -140,13 +139,10 @@ interface StoredPairingToken {
   /** `agent`: the GoodVibes Agent's credential for the calls it makes on the owner's behalf. */
   client?: 'agent' | undefined;
   /**
-   * `owner-pairing`: the owner paired this device in person, through their own
-   * pairing flow (started from their verified program or their signed-in session;
-   * the code their screen showed is what the device uses). Written when the token
-   * is minted and never changed afterwards; it counts only with `madeBy
-   * {owner: true}` (`ownerDeviceOf`). Absent: automation. Even the owner's own
-   * device is never the owner in person: it answers questions other callers
-   * raised and does the owner's native work, and its own risky acts are put to the owner.
+   * `owner-pairing`: the user paired this device through their pairing flow (the code
+   * their screen showed is what the device uses). Written when the token is minted and
+   * never changed afterwards (`ownerDeviceOf`). Absent: automation (a narrowed list or a
+   * named client). Either way it is the user's device, limited only by its stored scope list.
    */
   readonly origin?: 'owner-pairing' | undefined;
   /** Who made it, recorded from this release on (absent: made before this was recorded). */
@@ -490,11 +486,8 @@ export interface AuthenticatedPairingToken {
   /** The scope list the pairing stores, when it was issued a narrower one than full operator authority. */
   readonly scopes?: readonly string[] | undefined;
   /**
-   * True for a device the owner paired in person (see {@link PublicPairingToken.origin}): recorded `owner-pairing` and
-   * made by the owner in person (`madeBy {owner: true}`), or, on this machine only, a device recorded `owner-pairing`
-   * before makers were recorded. Never one made on the owner's yes to someone else's request, and never a mark taken from
-   * another machine's word alone (`ownerDeviceOf`). It is NOT the owner in person: it answers a question another caller
-   * raised and does the owner's native work; its own risky acts are put to the owner (daemon/method-owner-decision.ts `ownersDevice`).
+   * True for a device paired through the pairing flow (see {@link PublicPairingToken.origin}): recorded `owner-pairing`,
+   * on this machine or arriving from another machine of the group (`ownerDeviceOf`). It is the user's own device.
    */
   readonly ownerDevice?: true | undefined;
   /**
@@ -505,16 +498,14 @@ export interface AuthenticatedPairingToken {
 }
 
 /**
- * Whether a pairing record is the owner's own device. The origin mark alone is the writer's word: it counts only with
- * the maker the daemon recorded as the owner in person (`{owner: true}`, their verified program, their signed-in session or
- * the daemon's own act). A record kept on THIS machine from before makers were recorded (no `madeBy`) keeps its mark
- * once, as this machine's own fact; one that arrived from another machine of the group without the owner's recorded
- * act is not the owner's device here, whatever its origin says (gate-review-6 G1, G2).
+ * Whether a pairing record is the user's own device: its origin is the pairing flow's. The maker and the machine it
+ * was made on are a record and decide nothing.
  */
-export function ownerDeviceOf(origin: unknown, madeBy: unknown, local: boolean): boolean {
-  if (origin !== 'owner-pairing') return false;
-  if (isPairingMaker(madeBy)) return 'owner' in madeBy;
-  return local && madeBy === undefined;
+export function ownerDeviceOf(origin: unknown, _madeBy: unknown, _local: boolean): boolean {
+  // As released in 3.5.0: a pairing made through the pairing flow (`origin: owner-pairing`) is the user's own device, on
+  // this machine and on every machine of the group (every machine of the group is the same user). Who made it and where it
+  // was made are a record only and decide nothing.
+  return origin === 'owner-pairing';
 }
 
 /**
@@ -1795,11 +1786,8 @@ export class PairingTokenManager {
         ...(input.mintedBy !== undefined ? { mintedBy: input.mintedBy } : {}),
         ...(attemptId !== undefined ? { attemptId } : {}),
         ...(input.client === 'agent' ? { client: 'agent' as const } : {}),
-        // The owner's own device only through their pairing flow, made by them (`madeBy {owner: true}`), never with a
-        // narrowed list or a named client: a mint that states the origin without that maker is automation, so no new
-        // record can pass for one kept from before makers were recorded (`ownerDeviceOf`).
-        ...(input.origin === 'owner-pairing' && scopes === undefined && input.client === undefined
-          && isPairingMaker(input.madeBy) && 'owner' in input.madeBy ? { origin: 'owner-pairing' as const } : {}),
+        // The user's own device through their pairing flow, never with a narrowed list or a named client (as released).
+        ...(input.origin === 'owner-pairing' && scopes === undefined && input.client === undefined ? { origin: 'owner-pairing' as const } : {}),
         // A migration's mint skipped the cap; its first use does too.
         ...(!options.enforceCap ? { capExempt: true as const } : {}),
         ...(input.madeBy !== undefined && isPairingMaker(input.madeBy) ? { madeBy: input.madeBy } : {}),
@@ -1869,12 +1857,9 @@ export class PairingTokenManager {
         return null;
       }
       const extra = entry.public as Record<string, unknown>;
-      // Another machine's word alone never makes the owner's device here: only the owner's own recorded act (G2).
-      const remoteOwnerDevice = entry.public.client !== 'agent' && entry.public.scopes === null && ownerDeviceOf(extra['origin'], extra['madeBy'], false);
-      if (extra['origin'] === 'owner-pairing' && !remoteOwnerDevice
-        && noteRefusedFromGroup(`device-token:${entry.id}@${entry.rev}`, { what: `the paired device "${entry.public.name}" marked as your own device (it is an ordinary device here)`, origin: entry.origin, at: Date.now() })) {
-        logger.warn('A device paired on another machine of the group arrived marked as the owner\'s own device without the owner\'s own act there; it is an ordinary device on this machine', { tokenId: entry.id, from: entry.origin });
-      }
+      // A device arriving from another machine of the group is taken as it is recorded (as released): every machine of the
+      // group is the same user, so one marked owner-pairing is the user's own device here too.
+      const remoteOwnerDevice = ownerDeviceOf(extra['origin'], extra['madeBy'], false);
       return { id: entry.id, name: entry.public.name, principalId: pairingPrincipalId(entry.id),
         ...(entry.public.client === 'agent' ? { client: 'agent' as const } : {}),
         ...(entry.public.scopes !== null ? { scopes: Object.freeze([...entry.public.scopes]) } : {}),

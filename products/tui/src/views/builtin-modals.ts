@@ -63,13 +63,13 @@ export function registerBuiltinModals(
   // ladder, so opening the modal never waits on them and already has the answer.
   if (pairingOriginUsesStableHost(deps.configManager)) void refreshStableHostInputs();
   manager.registerModalSurface(createPairingModalSurface({
-    getConnectionInfo: (request) => buildPairingConnectionInfo(deps, request),
+    getConnectionInfo: (request) => buildPairingConnectionInfo({ configManager: deps.configManager, pairingTokens: ui.platform.pairingTokens }, request),
     controlPlaneReadModel: ui.readModels.controlPlane,
     copyToClipboard,
     probeTailscale: () => probePairingTailscale(tailscaleGatewayDeps),
     runTailscaleServe: () => runPairingTailscaleServe(tailscaleGatewayDeps),
     stopTailscaleServe: () => stopPairingTailscaleServe(tailscaleGatewayDeps),
-    serveToNetwork: (name) => servePairingToNetwork(deps, name),
+    serveToNetwork: (name) => servePairingToNetwork({ configManager: deps.configManager, homeDirectory: ui.environment.shellPaths.homeDirectory }, name),
   }));
   manager.registerModalRedirect('qr-code', 'pairing-modal');
 
@@ -82,6 +82,12 @@ export function registerBuiltinModals(
   manager.registerModalRedirect('sessions', 'sessionPicker');
 }
 
+/** What makes a pairing offer: the settings that say where a phone could open it, and the store that holds the offer. */
+export interface PairingMintDeps {
+  readonly configManager: ResolvedBuiltinViewDeps['configManager'];
+  readonly pairingTokens: ResolvedBuiltinViewDeps['uiServices']['platform']['pairingTokens'];
+}
+
 /** The step that makes a new pairing code: the control that opened this screen. */
 const PAIR_AGAIN = 'Press Pair something (A phone or another device) in Devices and network again';
 
@@ -92,8 +98,7 @@ const PAIR_AGAIN = 'Press Pair something (A phone or another device) in Devices 
  * the pairing modal shows its message, so the cause is not guessed here.
  * Mirrors the retired Qr view factory's construction.
  */
-export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, request: PairingConnectionRequest = {}): PairingModalConnectionInfo | PairingModalUnreachable {
-  const ui = deps.uiServices;
+export function buildPairingConnectionInfo(deps: PairingMintDeps, request: PairingConnectionRequest = {}): PairingModalConnectionInfo | PairingModalUnreachable {
   const configManager = deps.configManager;
   // Derived live from the settings (a user-set web.publicBaseUrl wins).
   const webOrigin = resolvePairingWebOrigin(configManager);
@@ -108,7 +113,7 @@ export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, reques
   // Reopening shows the same offer while nobody has used it and it has not
   // expired: no new credential, no write. Otherwise the new offer replaces it.
   if (!request.fresh && held?.tokenId !== undefined && held.url === url && (request.name === undefined || held.tokenName === request.name)
-    && ui.platform.pairingTokens.isOpenOffer(held.tokenId)) {
+    && deps.pairingTokens.isOpenOffer(held.tokenId)) {
     return { ...held, thisMachineOnly };
   }
   const offers = availablePairingOffers({
@@ -120,7 +125,7 @@ export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, reques
   // Mint a per-device offer and encode the canonical `#pair=` deep link,
   // the same mint the pairing.handoff.create verb performs, no raw JSON blob.
   const handoff = mintPairingHandoff({
-    pairingTokens: ui.platform.pairingTokens,
+    pairingTokens: deps.pairingTokens,
     name: request.name ?? defaultPairingTokenName(),
     offers,
     webOrigin: webOrigin.origin,
@@ -154,8 +159,8 @@ interface PairingHandoffAnswer {
  * for the address phones can open, in one request (pairing.handoff.create
  * `serveToNetwork`). It throws with the daemon's reason when it cannot.
  */
-async function servePairingToNetwork(deps: ResolvedBuiltinViewDeps, name?: string): Promise<PairingModalConnectionInfo> {
-  const rpc = resolveOperatorRpc({ configManager: deps.configManager, homeDirectory: deps.uiServices.environment.shellPaths.homeDirectory });
+export async function servePairingToNetwork(deps: { readonly configManager: ResolvedBuiltinViewDeps['configManager']; readonly homeDirectory: string }, name?: string): Promise<PairingModalConnectionInfo> {
+  const rpc = resolveOperatorRpc({ configManager: deps.configManager, homeDirectory: deps.homeDirectory });
   if (!rpc.available) throw new Error(rpc.reason);
   let answer: PairingHandoffAnswer;
   try {

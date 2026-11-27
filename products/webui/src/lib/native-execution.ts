@@ -30,9 +30,9 @@ function failure(error: unknown): Error {
   // never the transport's, the access scopes' or the decision model's own names.
   const messages: Record<string, string> = {
     NATIVE_EXECUTION_UNSUPPORTED_AUTHORITY:
-      "The work was not started: only the owner, or a device the owner paired, runs work on the daemon. Sign in with the owner's name and password, then try again.",
+      "The work was not started: this browser's sign-in cannot run work on the daemon. Sign in with your name and password, or pair this browser (Settings, Devices and pairing), then try again.",
     PAIRED_OWNER_REQUIRED:
-      "The work was not started: only the owner, or a device the owner paired, runs work on the daemon. Sign in with the owner's name and password, or pair this browser (Settings, Devices and pairing), then try again.",
+      "The work was not started: this browser is not signed in as you or paired as your device, so it cannot run work on the daemon. Sign in with your name and password, or pair this browser (Settings, Devices and pairing), then try again.",
     FORBIDDEN:
       "The work was not started: this browser's pairing does not allow running work. Pair it again with full access (Settings, Devices and pairing), then try again.",
     NATIVE_EXECUTION_REFUSED:

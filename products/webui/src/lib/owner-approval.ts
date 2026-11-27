@@ -56,7 +56,7 @@ export class OwnerApprovalPendingError extends Error {
   readonly approvalId: string;
   readonly answer: OwnerApprovalPendingAnswer;
   constructor(answer: OwnerApprovalPendingAnswer) {
-    super(`${describe(answer)} is waiting for the owner's approval. Nothing has changed yet; it is applied when the owner approves it.`);
+    super(`${describe(answer)} is waiting for your approval. Nothing has changed yet; it is applied when you approve it.`);
     this.name = 'OwnerApprovalPendingError';
     this.approvalId = answer.approvalId;
     this.answer = answer;

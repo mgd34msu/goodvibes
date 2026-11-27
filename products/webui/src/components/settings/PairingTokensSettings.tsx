@@ -418,8 +418,8 @@ export function PairingTokensSettings() {
                 className="pairing-token-row"
                 title={token.name}
                 meta={[
-                  // How it came to exist: a device the owner paired in person makes their own acts; an automation token does not.
-                  token.origin === 'owner-pairing' ? 'owner device' : 'automation token',
+                  // How it came to exist: paired from a screen where you were signed in, or made as an automation token for a script.
+                  token.origin === 'owner-pairing' ? 'paired device' : 'automation token',
                   // Who made it (recorded from this release on).
                   madeByWords((token as { madeBy?: unknown }).madeBy),
                   whenLabel(token.createdAt) && `Created ${whenLabel(token.createdAt)}`,
@@ -455,10 +455,10 @@ export function PairingTokensSettings() {
 
         {tokens.isSuccess && rows.some((token) => `pairing:${token.id}` === currentPrincipal && token.origin !== 'owner-pairing') && (
           <p className="pairing-token-row__note" role="note">
-            This browser is signed in with an automation token, so it is not you: its own changes (loosening a security,
-            permission, judgment or payment setting) are decided under your permission mode as anyone's are, and it never
-            answers a question addressed to you. To make it your own device, use
-            "This browser" below with the sign-in code your own screen shows; revoke this automation token afterwards.
+            This browser is signed in with an automation token: a token made for a script rather than paired from a
+            screen. It is yours like every token of this install; revoking it from the list signs this browser out. To give
+            this browser a device of its own, use "This browser" below with the sign-in code your own screen shows, then
+            revoke the automation token if nothing else uses it.
           </p>
         )}
       </SettingsBlock>
@@ -471,7 +471,7 @@ export function PairingTokensSettings() {
             ? 'This browser is signed in as you, with your password: it already acts as you. There is nothing to migrate.'
             : yourDevice
               ? `This browser is your own device ("${thisBrowsersDevice?.name ?? ''}"), paired on your own screen. There is nothing to migrate.`
-              : 'This browser does not act as you (it holds the shared token or a key someone else asked for). It becomes your own device the one way any device does: on a screen where you are signed in as yourself, press Pair a new device, then "Show the sign-in code once", and type that code here. Or sign in here with your password.'}
+              : 'This browser holds the shared token or an automation token, not a device of its own. To give it one, on a screen where you are signed in press Pair a new device, then "Show the sign-in code once", and type that code here. Or sign in here with your password.'}
         >
           {!signedInAsYou && !yourDevice && (
             <form

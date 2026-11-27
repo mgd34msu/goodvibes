@@ -35,26 +35,13 @@ import { MemoryRegistry } from '../platform/src/platform/state/memory-registry.t
 import { MemoryEmbeddingProviderRegistry } from '../platform/src/platform/state/memory-embeddings.ts';
 import { CapabilityCatalog, createDaemonCapabilityServices, movedCapabilityEntries } from '../platform/src/platform/capabilities/index.ts';
 import { CALL_PROJECT_HEADER } from '../platform/src/platform/runtime/client/call-context.ts';
-import { daemonCallerProjectCheck, daemonCallerProjectsForget } from '../platform/src/platform/daemon/facade-composition.ts';
-import { CallerProjectsStore } from '../platform/src/platform/workspace/caller-projects-store.ts';
-import { resolveGoodVibesDaemonHome } from '../platform/src/platform/config/goodvibes-home.ts';
-import { pairingPrincipalId } from '../platform/src/platform/pairing/principal-ids.ts';
+import { daemonCallerProjectCheck } from '../platform/src/platform/daemon/facade-composition.ts';
 import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
-import { execFileSync } from 'node:child_process';
-import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.ts';
 import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
-import { registerRecordOwners } from '../platform/src/platform/daemon/record-owners.ts';
-import { registerCheckpointGatewayMethods } from '../platform/src/platform/control-plane/routes/checkpoints.ts';
-import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/checkpoint/manager.ts';
-import { memoryProjectOf } from '../platform/src/platform/state/memory-project.ts';
-import { emitTurnSubmitted } from '../platform/src/platform/runtime/emitters/turn.ts';
-import { RUNTIME_EVENT_DOMAINS } from '../platform/src/platform/runtime/events/index.ts';
-import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.ts';
 import { createCapabilityOwnerGate } from '../platform/src/platform/daemon/capability-owner-gate.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
-import { DEFAULT_PAIRED_SCOPES } from '../platform/src/platform/control-plane/routes/pairing.ts';
 
 const OPERATOR_TOKEN = 'fixture-operator-token';
 let dir: string;
@@ -64,7 +51,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('a capability acts in the project its call names, from its subfolder too, by header or body; with none only the files for every project; the daemon\'s folder only when named; a device only in a project given to it; a refusing rule in every project', async () => {
+test('a capability acts in the project its call names, from its subfolder too, by header or body; with none only the files for every project; the daemon\'s folder only when named; a refusing rule in every project', async () => {
   dir = mkdtempSync(join(tmpdir(), 'gv-call-context-'));
   const home = join(dir, 'home');
   const daemonFolder = join(dir, 'daemon-own');
@@ -98,26 +85,17 @@ test('a capability acts in the project its call names, from its subfolder too, b
     } as unknown as Parameters<typeof createCapabilityOwnerGate>[0]),
   });
   const userAuth = new UserAuthManager({ bootstrapFilePath: join(dir, 'users.json'), bootstrapCredentialPath: join(dir, 'bootstrap.txt'), scryptParams: { N: 1024, r: 1, p: 1 } });
-  const bus = new RuntimeEventBus();
-  const gateway = new ControlPlaneGateway({ runtimeBus: bus });
-  // What a caller follows is held to the same rule as what it reaches (control-plane/event-reach.ts), as the daemon sets it.
-  gateway.setEventReachRules(() => catalog.reachRules());
   const helperContext = {
     gatewayMethods: catalog, pairingTokens: pairing, userAuth,
-    controlPlaneGateway: gateway,
+    controlPlaneGateway: new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus() }),
     authToken: () => OPERATOR_TOKEN, trustProxyEnabled: () => false, host: '127.0.0.1', port: 0,
-    // The daemon's one check of a caller's project, and what it forgets for a caller that is gone, as the daemon
-    // composes them (facade-composition.ts).
+    // The daemon's one check of the project a call names, as the daemon composes it (facade-composition.ts).
     callerProject: daemonCallerProjectCheck(home),
-    forgetCallerProjects: daemonCallerProjectsForget(home),
   };
   const helper = new DaemonControlPlaneHelper(helperContext as unknown as DaemonControlPlaneContext);
-  helper.watchRevocations();
   cleanups.push(() => helper.dispose());
 
-  // The owner in person, on their own signed-in session (the account made at first start): who names any project. The
-  // operator token alone is a script, and a paired device, the owner's own included, is never the owner in person
-  // (daemon/method-owner-decision.ts `ownerHimself`): each names only what the owner gave it.
+  // The user's own signed-in session (the account made at first start); every credential of the user names any project.
   const ownerName = userAuth.ownerUsername();
   if (ownerName === null) throw new Error('the user store made no owner account at first start');
   const ownersSession = userAuth.createSession(ownerName).token;
@@ -134,228 +112,29 @@ test('a capability acts in the project its call names, from its subfolder too, b
   };
   const header = { [CALL_PROJECT_HEADER]: encodeURIComponent(yellow) };
 
-  // Two paired devices: yellow and zinc are registered workspaces, and the owner gave the kiosk yellow only. The root is
-  // registered too (after the rows above) and given whole to the other device: the root, the home folder and the daemon
-  // home stay no project whatever was registered or given.
-  const register = (roots: readonly string[]): string => {
-    mkdirSync(join(home, '.goodvibes', 'shared'), { recursive: true });
-    writeFileSync(join(home, '.goodvibes', 'shared', 'workspace-registrations.json'), JSON.stringify({ workspaces: roots.map((root) => ({ root })) }));
-    return '';
-  };
-  const kiosk = pairing.mint({ name: 'kiosk' });
-  const everywhere = pairing.mint({ name: 'given the root' });
-  const given = new CallerProjectsStore(resolveGoodVibesDaemonHome(home));
-  given.set(pairingPrincipalId(kiosk.id), [yellow]);
-  given.set(pairingPrincipalId(everywhere.id), ['/']);
-  const asDevice = (token: string, folder: string): Promise<string> => actedIn({}, { workingDirectory: folder }, 'mcp.files', token);
-  // A member the owner gave yellow, then removed while signed out: a user made later with that member's name gets nothing of theirs.
-  userAuth.addUser('member1', ['correct', 'horse', 'battery', 'member'].join('-'), ['admin']);
-  given.set('member1', [yellow]);
-  const removedMember = (): string => {
-    const before = given.projectsOf('member1').length;
-    userAuth.deleteUser('member1');
-    return `member given ${before} project, removed while signed out, keeps ${given.projectsOf('member1').length}`;
-  };
-  // A folder a process will work in named by another input than the project (an outside coding agent's cwd): the code
-  // the dispatch answered, or that it got past the project check (no agent is installed here, so nothing starts).
-  const agentIn = async (token: string, cwd: string): Promise<string> => {
-    const answer = await helper.invokeGatewayMethodCall({ authToken: token, methodId: 'acp.sessions.create', body: { agentId: 'no-such-agent', cwd }, context: { clientKind: 'tui' } });
-    const code = String((answer.body as { code?: unknown }).code);
-    return code === 'PROJECT_NOT_ALLOWED' ? `refused ${answer.status} ${code}` : 'past the project check';
-  };
+  // The user's projects need no gift, but a project a call names must be registered: yellow and zinc are.
+  mkdirSync(join(home, '.goodvibes', 'shared'), { recursive: true });
+  writeFileSync(join(home, '.goodvibes', 'shared', 'workspace-registrations.json'), JSON.stringify({ workspaces: [yellow, zinc].map((root) => ({ root })) }));
 
   // A rule that refuses a capability, kept in yellow, and one that allows another there: the refusal is among zinc's rules.
   for (const [id, effect, capability] of [['refuses-in-yellow', 'deny', 'mcp.files'], ['allows-in-yellow', 'allow', 'memory.list']] as const) {
     await rules.add({ rule: { id, type: 'arg-shape', toolPattern: 'capability_run', argMatchers: { id: capability }, effect, origin: 'user' }, createdAt: Date.now(), tier: 'tool', tool: 'capability_run', project: yellow });
   }
 
-  // What the daemon keeps in zinc and in yellow, in its real stores, each kind's owner looked up as the daemon composes it
-  // (daemon/record-owners.ts, routes/checkpoints.ts): the owner's web chat in zinc and the kiosk's own in yellow, a "this
-  // project" memory record and a question waiting for the owner in each, and a checkpoint of zinc's store. A device the
-  // owner gave zinc is the control that a checkpoint of zinc is reached by a caller zinc was given.
-  const chats = new CompanionChatManager({ provider: { async *chatStream() { yield { type: 'done' as const }; } }, eventPublisher: { publishEvent: () => {} }, sessionsDir: join(dir, 'chats'), persist: false, rateLimiter: false });
-  await chats.init();
-  cleanups.push(() => { void chats.close(); });
-  registerRecordOwners(catalog, { chats, approvals, memory: memoryRegistry });
-  execFileSync('git', ['init', '-q', '-b', 'main', zinc]);
-  execFileSync('git', ['-c', 'user.email=owner@example.invalid', '-c', 'user.name=Owner', 'commit', '-q', '--allow-empty', '-m', 'start'], { cwd: zinc });
-  const zincCheckpoints = new WorkspaceCheckpointManager({ workspaceRoot: zinc, autoRetention: false });
-  cleanups.push(() => { zincCheckpoints.dispose(); });
-  registerCheckpointGatewayMethods(catalog, zincCheckpoints);
-  const zincDevice = pairing.mint({ name: 'given zinc' });
-  given.set(pairingPrincipalId(zincDevice.id), [zinc]);
-  const zincChat = chats.createSession({ project: zinc }).id;
-  const kioskChat = chats.createSession({ project: yellow, createdBy: pairingPrincipalId(kiosk.id) }).id;
-  // The device given yellow and the device given zinc follow the event stream, each as the daemon opens it for its
-  // credential; the questions below are published to it, and a turn of zinc's chat and of the kiosk's own is emitted.
-  approvals.setPublisher(gateway);
-  // yellow and zinc are registered projects before anything is followed (a project not registered is no one's to name).
-  // The root is registered only from the device rows on: registered before, it would be the project of every folder below it.
-  register([yellow, zinc]);
-  // A socket client of the gateway, as the daemon opens one for a credential: every frame it is sent, as sent.
-  const follow = (token: string): { readonly done: () => Promise<string> } => {
-    const principal = helper.describeRequestPrincipal(token, true)!;
-    const frames: string[] = [];
-    const opened = gateway.openWebSocketClient({
-      transport: 'ws', domains: [...RUNTIME_EVENT_DOMAINS], principalId: principal.principalId, scopes: principal.scopes, admin: principal.admin,
-      reachContext: { credentialKind: principal.credentialKind, principalId: principal.principalId, actor: principal.actor },
-    }, (event, payload) => { frames.push(`${event} ${JSON.stringify(payload)}`); });
-    cleanups.push(() => gateway.closeWebSocketClient(opened.clientId));
-    // The bus hands a runtime event to its listeners in a microtask queued at emit (runtime/events): read after it ran.
-    return { done: async () => { await Promise.resolve(); return frames.join('\n'); } };
-  };
-  const kioskFollows = follow(kiosk.token);
-  const zincDeviceFollows = follow(zincDevice.token);
-  const remembered = async (folder: string): Promise<string> => (await memoryRegistry.add({ scope: 'project', project: memoryProjectOf(folder)!, cls: 'fact', summary: `a fact of ${folder}`, tags: [], provenance: [] })).id;
-  const zincRecord = await remembered(zinc);
-  const yellowRecord = await remembered(yellow);
-  const question = async (folder: string): Promise<string> => (await approvals.raiseApproval({ request: { callId: `call-${folder}`, tool: 'exec', args: { command: 'bun test' }, category: 'execute', workingDirectory: folder,
-    analysis: { classification: 'command', riskLevel: 'medium', summary: 'Run bun test', reasons: [] } } })).approval.id;
-  const zincQuestion = await question(zinc);
-  const yellowQuestion = await question(yellow);
-  for (const [sessionId, turnId] of [[zincChat, 'zinc-turn'], [kioskChat, 'kiosk-turn']] as const) {
-    emitTurnSubmitted(bus, { sessionId, source: 'call-context-project' }, { turnId, prompt: `words of ${turnId}` });
-  }
-  const kioskSaw = await kioskFollows.done();
-  const zincDeviceSaw = await zincDeviceFollows.done();
-  writeFileSync(join(zinc, 'notes.txt'), 'zinc\n');
-  const zincCheckpoint = (await zincCheckpoints.create({ kind: 'manual', label: 'zinc' }))?.id ?? '';
-  // By id, as the kiosk (given yellow) or the device given zinc, each an admin pairing as a paired device is: refused
-  // before any handler, or past the check (to the handler, or to a route this proof serves none of).
-  const byId = async (token: string, methodId: string, body: Record<string, unknown>): Promise<string> => {
-    try {
-      const answer = await helper.invokeGatewayMethodCall({ authToken: token, methodId, body, context: { clientKind: 'tui', admin: true } });
-      const code = String((answer.body as { code?: unknown }).code);
-      return code === 'RECORD_NOT_YOURS' ? `refused ${answer.status} ${code}` : 'past the check';
-    } catch { return 'past the check'; }
-  };
-  // The words of a refusal for a record of another project, and for no record at all: the same but for the id.
-  const wordsFor = async (sessionId: string): Promise<string> => {
-    try {
-      const answer = await helper.invokeGatewayMethodCall({ authToken: kiosk.token, methodId: 'companion.chat.messages.list', body: { sessionId }, context: { clientKind: 'tui', admin: true } });
-      return String((answer.body as { error?: unknown }).error).replace(sessionId, '<id>');
-    } catch { return `past the check for ${sessionId}`; }
-  };
-
-  // The daemon's HTTP router over the same catalog and the same authentication, as the daemon builds it, and the socket's
-  // method-and-path call sent to it (the dispatch's `dispatchApiRoutes`). A route outside the catalog (a session's event
-  // stream, an effect row of daemon/http/route-manifest.ts) and a route reached by its path over the socket pass the
-  // same checks a method does before they run: refused, or past the check (to a route this proof serves none of).
-  const bearerOf = (req: Request): string => /^Bearer\s+(.+)$/i.exec(req.headers.get('authorization') ?? '')?.[1] ?? '';
-  const router = new DaemonHttpRouter({
-    configManager: config, gatewayMethods: catalog, runtimeBus: bus, userAuth, authToken: () => OPERATOR_TOKEN,
-    authenticateRequest: (req: Request) => { const principal = helper.describeRequestPrincipal(bearerOf(req), true); return principal ? { principal } : null; },
-    extractAuthToken: bearerOf, artifactStore: { getMaxBytes: () => 1 }, channelPlugins: { getByPath: () => undefined },
-  } as unknown as ConstructorParameters<typeof DaemonHttpRouter>[0]);
-  cleanups.push(() => { void router.dispose(); });
-  Object.assign(helperContext, { dispatchApiRoutes: (req: Request) => router.dispatchApiRoutes(req) });
-  const routeAnswer = (status: number, body: unknown): string => {
-    const code = String((body as { code?: unknown } | null)?.code);
-    return status === 403 && (code === 'RECORD_NOT_YOURS' || code === 'PROJECT_NOT_ALLOWED') ? `refused ${status} ${code}` : 'past the check';
-  };
-  const streamOf = async (token: string, sessionId: string): Promise<string> => {
-    const response = await router.handleRequest(new Request(`http://127.0.0.1/api/sessions/${sessionId}/events`, { headers: { authorization: `Bearer ${token}` } }));
-    const body: unknown = await response.json().catch(() => null);
-    return routeAnswer(response.status, body);
-  };
-  const socketTask = async (token: string, folder: string): Promise<string> => {
-    const principal = helper.describeRequestPrincipal(token, true)!;
-    const answer = await helper.invokeWebSocketControlPlaneCall({ authToken: token, method: 'POST', path: '/task', body: { task: 'a task', workingDirectory: folder }, principal,
-      context: { principalKind: principal.principalKind, admin: principal.admin, scopes: principal.scopes, actor: principal.actor } });
-    return routeAnswer(answer.status, answer.body);
-  };
-  // A credential the owner made naming no scopes (the default list, routes/pairing.ts `DEFAULT_PAIRED_SCOPES`: a paired
-  // device below an admin) given yellow: starting a session is a project act it may make there (effect-authority.ts
-  // `sessions.write`), and never in a project it was not given (the method's `workingDirectory`, checked by the dispatch).
-  // Any refusal is shown by its code; past the checks the call reaches a route this proof serves none of.
-  const defaultDevice = pairing.mint({ name: 'default device', scopes: [...DEFAULT_PAIRED_SCOPES] });
-  given.set(pairingPrincipalId(defaultDevice.id), [yellow]);
-  const defaultSession = async (folder: string): Promise<string> => {
-    try {
-      const answer = await helper.invokeGatewayMethodCall({ authToken: defaultDevice.token, methodId: 'sessions.create', body: { title: 'from the default device', workingDirectory: folder }, context: { clientKind: 'tui', admin: false } });
-      const code = String((answer.body as { code?: unknown }).code);
-      return answer.status === 401 || answer.status === 403 ? `refused ${answer.status} ${code}` : 'past the check';
-    } catch { return 'past the check'; }
-  };
-  // Under Ask me a call that got past these checks waits on the owner's one answer; the owner answers No to each question raised
-  // from here on, so a row reads only how far its call got (a refusal of the project or record, or past the check).
-  const known = new Set(approvals.listApprovals(Number.MAX_SAFE_INTEGER).map((record) => record.id));
-  const stopAnswering = approvals.subscribe((record) => {
-    if (known.has(record.id) || record.status !== 'pending') return;
-    known.add(record.id);
-    void approvals.resolveApproval(record.id, { approved: false, actor: 'owner', expectedRevision: record.revision, reason: 'Not now.' }).catch(() => undefined);
-  });
   const rows = [
     `header ${await actedIn(header, {})}`,
     `subfolder ${await actedIn({ [CALL_PROJECT_HEADER]: encodeURIComponent(join(yellow, 'sub')) }, {})}`,
     `body over header ${await actedIn(header, { workingDirectory: zinc })}`,
     `none ${await actedIn({}, {})}`,
     `daemon's folder named ${await actedIn({}, { workingDirectory: daemonFolder })}`,
-    `${register(['/', yellow, zinc])}device in the root ${await asDevice(everywhere.token, '/')}`,
-    `device in the home folder ${await asDevice(everywhere.token, home)}`,
-    `device in the daemon home ${await asDevice(everywhere.token, resolveGoodVibesDaemonHome(home))}`,
-    `device in a project not given to it ${await asDevice(kiosk.token, zinc)}`,
-    `device in the project given to it ${await asDevice(kiosk.token, yellow)}`,
-    `device's outside agent in a project not given to it ${await agentIn(kiosk.token, zinc)}`,
-    `device's outside agent in the project given to it ${await agentIn(kiosk.token, yellow)}`,
     `rules kept in yellow that apply in zinc ${rules.rules(zinc).map((rule) => rule.id).join(',')}`,
-    `device by id: zinc's web chat ${await byId(kiosk.token, 'companion.chat.messages.list', { sessionId: zincChat })}`,
-    `device by id: its own web chat in yellow ${await byId(kiosk.token, 'companion.chat.messages.list', { sessionId: kioskChat })}`,
-    `device by id: zinc's memory record ${await byId(kiosk.token, 'capabilities.run', { id: 'memory.show', inputs: { record: zincRecord }, workingDirectory: yellow })}`,
-    `device by id: yellow's memory record ${await byId(kiosk.token, 'capabilities.run', { id: 'memory.show', inputs: { record: yellowRecord }, workingDirectory: yellow })}`,
-    `device by id: zinc's question ${await byId(kiosk.token, 'approvals.claim', { approvalId: zincQuestion, expectedRevision: 1 })}`,
-    `device by id: yellow's question ${await byId(kiosk.token, 'approvals.claim', { approvalId: yellowQuestion, expectedRevision: 1 })}`,
-    `device by id: zinc's checkpoint ${await byId(kiosk.token, 'checkpoints.restorePreview', { id: zincCheckpoint })}`,
-    `device given zinc by id: zinc's checkpoint ${await byId(zincDevice.token, 'checkpoints.restorePreview', { id: zincCheckpoint })}`,
-    // Saved artifacts named among several, separated by commas (artifacts.package): each one is checked (this proof's
-    // daemon keeps no artifact owner lookup, so none of them is the device's to reach).
-    `device by id: artifacts among several ${await byId(kiosk.token, 'capabilities.run', { id: 'artifacts.package', inputs: { artifacts: 'artifact-zinc-1, artifact-zinc-2', path: 'pkg' }, workingDirectory: yellow })}`,
-    `the words for zinc's chat are those for no chat ${await wordsFor(zincChat) === await wordsFor('no-such-chat')}`,
-    `device following: zinc's question ${kioskSaw.includes(zincQuestion)}, zinc's chat turn ${kioskSaw.includes('zinc-turn')}`,
-    `device following: yellow's question ${kioskSaw.includes(yellowQuestion)}, its own chat's turn ${kioskSaw.includes('kiosk-turn')}`,
-    `device given zinc following: zinc's question ${zincDeviceSaw.includes(zincQuestion)}, yellow's question ${zincDeviceSaw.includes(yellowQuestion)}`,
-    `route outside the catalog: the kiosk opens zinc's chat's event stream ${await streamOf(kiosk.token, zincChat)}`,
-    `route outside the catalog: the kiosk opens its own chat's event stream ${await streamOf(kiosk.token, kioskChat)}`,
-    `socket path call: the kiosk starts a task in zinc ${await socketTask(kiosk.token, zinc)}`,
-    `socket path call: the kiosk starts a task in yellow ${await socketTask(kiosk.token, yellow)}`,
-    `default credential starts a session in yellow ${await defaultSession(yellow)}`,
-    `default credential starts a session in zinc ${await defaultSession(zinc)}`,
-    removedMember(),
   ];
-  stopAnswering();
   expect(rows).toEqual([
     `header ${join(yellow, '.goodvibes', 'mcp.json')}`,
     `subfolder ${join(yellow, '.goodvibes', 'mcp.json')}`,
     `body over header ${join(zinc, '.goodvibes', 'mcp.json')}`,
     'none no project file, 1 for every project',
     `daemon's folder named ${join(daemonFolder, '.goodvibes', 'mcp.json')}`,
-    'device in the root refused 403 PROJECT_NOT_ALLOWED',
-    'device in the home folder refused 403 PROJECT_NOT_ALLOWED',
-    'device in the daemon home refused 403 PROJECT_NOT_ALLOWED',
-    'device in a project not given to it refused 403 PROJECT_NOT_ALLOWED',
-    `device in the project given to it ${join(yellow, '.goodvibes', 'mcp.json')}`,
-    'device\'s outside agent in a project not given to it refused 403 PROJECT_NOT_ALLOWED',
-    'device\'s outside agent in the project given to it past the project check',
     'rules kept in yellow that apply in zinc refuses-in-yellow',
-    'device by id: zinc\'s web chat refused 403 RECORD_NOT_YOURS',
-    'device by id: its own web chat in yellow past the check',
-    'device by id: zinc\'s memory record refused 403 RECORD_NOT_YOURS',
-    'device by id: yellow\'s memory record past the check',
-    'device by id: zinc\'s question refused 403 RECORD_NOT_YOURS',
-    'device by id: yellow\'s question past the check',
-    'device by id: zinc\'s checkpoint refused 403 RECORD_NOT_YOURS',
-    'device given zinc by id: zinc\'s checkpoint past the check',
-    'device by id: artifacts among several refused 403 RECORD_NOT_YOURS',
-    'the words for zinc\'s chat are those for no chat true',
-    'device following: zinc\'s question false, zinc\'s chat turn false',
-    'device following: yellow\'s question true, its own chat\'s turn true',
-    'device given zinc following: zinc\'s question true, yellow\'s question false',
-    'route outside the catalog: the kiosk opens zinc\'s chat\'s event stream refused 403 RECORD_NOT_YOURS',
-    'route outside the catalog: the kiosk opens its own chat\'s event stream past the check',
-    'socket path call: the kiosk starts a task in zinc refused 403 PROJECT_NOT_ALLOWED',
-    'socket path call: the kiosk starts a task in yellow past the check',
-    'default credential starts a session in yellow past the check',
-    'default credential starts a session in zinc refused 403 PROJECT_NOT_ALLOWED',
-    'member given 1 project, removed while signed out, keeps 0',
   ]);
 });

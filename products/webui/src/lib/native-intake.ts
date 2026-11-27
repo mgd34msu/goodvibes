@@ -126,7 +126,7 @@ export async function openNativeIntake(
         new Error(
           owner
             ? `${feature} needs full access, and this browser's pairing does not have it. Pair it again with full access (Settings, Devices and pairing), then try again.`
-            : `${feature} is for the owner: sign in with the owner's name and password, or pair this browser (Settings, Devices and pairing), then try again.`
+            : `${feature} needs this browser signed in as you or paired as your device: sign in with your name and password, or pair this browser (Settings, Devices and pairing), then try again.`
         ),
         { code: "PAIRED_OWNER_REQUIRED" }
       );

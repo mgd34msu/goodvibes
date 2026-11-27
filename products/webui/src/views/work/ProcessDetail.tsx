@@ -127,7 +127,7 @@ function ObservedSteer({ node, observed }: { node: FleetProcessNode; observed: N
           </div>
           {steer.isPending && (
             <p className="work-prose" role="status">
-              Typing into a session GoodVibes did not start needs the owner&apos;s approval; answer it in Approvals.
+              Typing into a session GoodVibes did not start needs your approval; answer it in Approvals.
             </p>
           )}
         </form>

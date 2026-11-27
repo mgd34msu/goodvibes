@@ -32,8 +32,8 @@ function approvalIdOfFrame(payload: unknown): string | null {
 }
 
 const OUTCOME_TEXT: Record<Exclude<OwnerApprovalOutcome, 'pending'>, { readonly title: string; readonly tone: 'success' | 'warning' }> = {
-  approved: { title: 'The owner approved the change; it is applied', tone: 'success' },
-  denied: { title: 'The owner declined the change; nothing changed', tone: 'warning' },
+  approved: { title: 'You approved the change; it is applied', tone: 'success' },
+  denied: { title: 'You declined the change; nothing changed', tone: 'warning' },
   expired: { title: 'The change expired unanswered; nothing changed', tone: 'warning' },
   cancelled: { title: 'The change was cancelled; nothing changed', tone: 'warning' },
   left: { title: 'This tab signed out or changed daemon while the change waited', tone: 'warning' },
@@ -42,7 +42,7 @@ const OUTCOME_TEXT: Record<Exclude<OwnerApprovalOutcome, 'pending'>, { readonly 
 /** The notice's description per outcome; `left` says where the approval is still decided. */
 function outcomeDescription(outcome: Exclude<OwnerApprovalOutcome, 'pending'>, summary: string): string {
   return outcome === 'left'
-    ? `${summary} is still decided by the owner on the daemon that asked; this tab no longer follows it.`
+    ? `${summary} is still waiting for you on the daemon that asked; this tab no longer follows it.`
     : summary;
 }
 
@@ -58,8 +58,8 @@ export function OwnerApprovalNotices(): null {
       if (change.outcome === 'pending') {
         if (!pendingToasts.current.has(change.approvalId)) {
           pendingToasts.current.set(change.approvalId, toast({
-            title: 'Waiting for the owner\'s approval',
-            description: `${change.summary} loosens a setting only the owner changes. Nothing has changed yet; it is applied when the owner approves it (approval ${change.approvalId}).`,
+            title: 'Waiting for your approval',
+            description: `${change.summary} loosens a protection, so it is put to you first. Nothing has changed yet; it is applied when you approve it (approval ${change.approvalId}).`,
             tone: 'info',
             durationMs: 0,
           }));

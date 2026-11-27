@@ -358,18 +358,17 @@ function causeOfRun(at: GatewayMethodInvocation, facts: { readonly ownerAnswered
   const actor = at.context.actor ?? systemActor('in-process');
   // The owner's yes to a caller below the owner's own call: the owner's own, and that caller (by its principal) acts on it afterwards.
   if (facts.ownerAnswered) {
-    const asker = actor.class !== 'owner' && actor.class !== 'system' && at.context.principalId ? { madeFor: at.context.principalId } : {};
+    const asker = !isTheUser(actor) && actor.class !== 'system' && at.context.principalId ? { madeFor: at.context.principalId } : {};
     return { party: 'owner', ...asker };
   }
-  // The owner's own press, by the ONE definition of the owner in person (daemon/method-owner-decision.ts): every request
-  // on their signed-in session, and a person's claim in their own program. What the owner writes so is theirs, never someone else's.
-  if (!facts.modelOfTurn && ownersOwnPress({ actor, credentialKind: at.context.credentialKind ?? undefined, registration: at.context.call?.registration, personAsked: personAsked(at) })) return { party: 'owner' };
-  if (personAsked(at) && actor.class === 'owner' && actor.agentFor === undefined) return { party: 'owner' };
+  // The user, from any credential (daemon/method-owner-decision.ts `isTheUser`: a sign-in under any name, a device, the
+  // machine's token, a typed `do`), with or without a person's claim: what the user starts is theirs, on every device.
+  if (!facts.modelOfTurn && isTheUser(actor)) return { party: 'owner' };
   if (facts.modelOfTurn) {
     // The model acts for whose turn it is (security/turn-session.ts): a member's or a device's chat is theirs, so what it
     // runs is theirs, whoever sent the message there.
     const actingFor = actor.agentFor;
-    if (actingFor !== undefined && actingFor.class !== 'owner' && actingFor.class !== 'system') return { party: 'other', who: `the model of ${actingFor.class} ${actingFor.id}` };
+    if (actingFor !== undefined && !isTheUser(actingFor) && actingFor.class !== 'system') return { party: 'other', who: `the model of ${actingFor.class} ${actingFor.id}` };
     // A model of the owner's own verified program (its capability gate decided the call, `decidedByProgramGate`): the
     // turn ran in that program, which keeps its own party (a turn there on someone else's input runs reads only and
     // never reaches this), so this daemon has no turn in scope to read: it is the owner's own turn's. What that conversation
@@ -632,11 +631,10 @@ function createRunHandler(deps: CapabilityRouteDeps, methods: Pick<GatewayMethod
       // answers. Any other run's nested answer is refused (method-owner-decision.ts `nestedAnswerAdmitted`).
       ...(answering ? ['answers-the-owner'] : []),
     ]);
-    // A command line by its client kind, or by the registration the daemon issued it (`cli`: known by the registration it
-    // runs under, never by an environment variable a command can unset; daemon/program-registrations.ts).
-    const commandLineCall = invocation.context.clientKind === COMMAND_LINE_CLIENT_KIND || isCommandLineRegistration(invocation.context.call?.registration);
-    // A command line's act the owner decides goes to the gate (below), its typed paths taken as the person named them.
-    const decidedFromCommandLine = commandLineCall && ownerDecides;
+    // A typed `do` is the user's own act: it carries the person's claim and is decided exactly as the same act from the
+    // terminal app with the user's press, in every mode. Nothing is held for being a command line (capabilities/
+    // command-line-hold.ts is no longer read here), so no call is "decided from a command line".
+    const decidedFromCommandLine = false;
     const namedByPerson = (at: GatewayMethodInvocation): boolean => personAsked(at) || decidedFromCommandLine;
     // A model behind this call (the owner's program's model, one of the daemon's turns, or a script holding the
     // Agent's credential): what no model makes is refused, in every mode, the owner's own turn included (method-risk.ts

@@ -423,7 +423,6 @@ export class CompanionChatManager {
   private readonly toolRegistry: ToolRegistry | null;
   private readonly turnEnvironment: CompanionChatManagerConfig['turnEnvironment'];
   private readonly automaticProject: CompanionChatManagerConfig['automaticProject'];
-  private readonly ownerUsername: CompanionChatManagerConfig['ownerUsername'];
   private readonly permissionManager: PermissionManager | null;
   private readonly hookDispatcher: HookDispatcherLike | null;
   private readonly runtimeBus: RuntimeEventBus | null;
@@ -458,7 +457,6 @@ export class CompanionChatManager {
     this.toolRegistry = config.toolRegistry ?? null;
     this.turnEnvironment = config.turnEnvironment;
     this.automaticProject = config.automaticProject;
-    this.ownerUsername = config.ownerUsername;
     this.permissionManager = config.permissionManager ?? null;
     this.hookDispatcher = config.hookDispatcher ?? null;
     this.runtimeBus = config.runtimeBus ?? null;
@@ -1512,20 +1510,16 @@ export class CompanionChatManager {
    * session's sends. Cost: one AsyncLocalStorage.run per turn.
    */
   /**
-   * Whom the chat's model acts for: its maker, as kept when it was made (a member, a device, an admin who is not the
-   * owner), whoever sends a message there. Undefined for the owner's own chats (made with their credential or in process):
-   * their model, as before. An older chat kept no maker: made by the owner's sign-in or their machine's token it is theirs;
-   * made by anyone else, it is that principal's as a member holding no scope, the least a credential is.
+   * Whom the chat's model acts for: the user, from whichever credential made the chat (a second sign-in, a device, the
+   * machine's token), whoever sends a message there: undefined, their model as before. Only a chat a guest or a peer made
+   * keeps that maker as the one its model acts for.
    */
   private makerActorOf(meta: CompanionChatSession): Actor | undefined {
     const by = meta.createdBy;
     if (by === undefined || by === 'local' || by === 'shared-token') return undefined;
     const maker = meta.maker;
-    if (maker === undefined) {
-      if (by === this.ownerUsername?.()) return undefined;
-      return Object.freeze({ class: 'member' as const, id: by, scopes: new Set<string>(), via: 'http' as const });
-    }
-    if (maker.class === 'owner' || maker.class === 'system') return undefined;
+    if (maker === undefined) return undefined;
+    if (maker.class !== 'guest' && maker.class !== 'peer') return undefined;
     return Object.freeze({ class: maker.class, id: by, scopes: maker.scopes === 'all' ? 'all' as const : new Set(maker.scopes), via: 'http' as const });
   }
 

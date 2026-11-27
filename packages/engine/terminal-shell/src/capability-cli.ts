@@ -8,20 +8,14 @@
  * Both are the daemon's methods (`capabilities.run`, `capabilities.find`),
  * called with this program's daemon credential, the command-line client kind
  * (`x-goodvibes-client: cli`) and a registration of the command-line kind
- * (`cli`, platform daemon/program-registrations.ts): a command line is never a
- * person's press, whatever its environment, its terminal or its marks say, so
- * `do` never carries the person's claim. It runs no-risk reads; an act that
- * weakens a protection (installing something that runs by itself included),
- * cannot be undone, spends money, writes a secret or is the owner's own is
- * decided by the daemon under the owner's permission mode (platform
- * capabilities/command-line-hold.ts): YOLO runs it, Jev decides gives it to
- * Jev, Ask me asks the owner on the approval card and this command waits on their one
- * answer. It answers no question addressed to the owner and approves nothing.
- * Nothing is asked at the terminal: anything that can drive a terminal
- * (`tmux send-keys`, `ssh -tt localhost`, `script`) can type there, and a
- * command a model's command tool ran can clear any mark it was given. A
- * capability that acts on a conversation is refused in one line: it needs a
- * program holding a conversation.
+ * (`cli`, platform daemon/program-registrations.ts). `find` carries no claim; `do` carries the person's claim, because a typed
+ * `do` is the user's own act and is decided exactly as the same act pressed in
+ * the terminal app, in every mode: nothing is held for the owner for being
+ * typed on a command line (the old hold, platform
+ * capabilities/command-line-hold.ts, is no longer read). A capability that
+ * acts on a conversation is refused in one line: it needs a program holding a
+ * conversation. A model that runs `goodvibes do` as a shell command is a
+ * model's command, decided by the turn's command gate like any command.
  *
  * Exit codes (docs/exit-codes.md): 0 done, 1 it ran and did not succeed (a
  * refusal included), 2 the command line was wrong.
@@ -120,8 +114,8 @@ function inputLine(entry: FoundRow['inputs'][number]): string {
 export async function runCapabilityCli(input: CapabilityCliInput): Promise<number> {
   // Every call this process makes names the command-line client kind, and carries the registration of the program whose
   // command line it is (the terminal app's, the Agent's, or the daemon's own: the product's programs, verified by the
-  // daemon's program socket). The daemon still holds a command line's risky call for the owner whatever it claims
-  // (capabilities/command-line-hold.ts).
+  // daemon's program socket). The daemon holds nothing for a command line: it is the user's own (the old hold,
+  // capabilities/command-line-hold.ts, is no longer read).
   markCommandLineCall(input.caller ?? 'daemon');
   if (input.verb === 'find') {
     if (input.args.some((word) => word.startsWith('--'))) return usage(input, 'find takes only the words of what you need (and --output json)');
@@ -142,12 +136,11 @@ export async function runCapabilityCli(input: CapabilityCliInput): Promise<numbe
   }
   const parsed = parseDoArgs(input.args);
   if ('problem' in parsed) return usage(input, parsed.problem);
-  // A command line is never a person's press (the header above): the person's claim is never sent. An act that weakens
-  // a protection, cannot be undone, spends money, writes a secret or is the owner's own is decided by the daemon under
-  // the owner's permission mode (capabilities/command-line-hold.ts); under Ask me this call waits on their one answer.
+  // A typed `do` is the user's own act: it carries the person's claim, as the terminal app's own typed action does, and is
+  // decided exactly so in every mode (nothing is held for the owner for being typed on a command line).
   const outcome = await input.invoke('capabilities.run', {
     id: parsed.id, inputs: parsed.inputs, workingDirectory: input.workingDirectory, ...(input.caller ? { program: input.caller } : {}),
-  }, { explicitUserRequest: false });
+  }, { explicitUserRequest: true });
   if (!outcome.ok) return failure(input, outcome);
   const data = outcome.data as { readonly text?: string };
   if (input.json) input.stdout(JSON.stringify({ ok: true, ...(outcome.data as object) }));

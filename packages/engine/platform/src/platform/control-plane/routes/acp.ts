@@ -12,6 +12,7 @@ import { AcpFleetCapacityError, type AcpHostService, type DiscoveredAcpAgent } f
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import type { TurnInputParty } from '../../security/turn-input-party.js';
+import { isTheUser } from '../../daemon/method-owner-decision.js';
 
 export interface AcpGatewayDeps {
   readonly host: Pick<AcpHostService, 'spawnAgent' | 'list'>;
@@ -27,13 +28,12 @@ function requirePrincipal(invocation: GatewayMethodInvocation): void {
 
 /**
  * Whose input an outside coding agent acts on, from the caller the transport established (never from the body): the
- * owner's when the owner in person started it (an owner-class caller that is not a model acting for them), anyone else's
- * otherwise (a paired device, a member, an admin's sign-in, a model): its asks are then decided as someone else's turn,
- * which runs reads only (security/turn-input-party.ts).
+ * user's when any credential of the user started it (not a model acting for them), anyone else's otherwise: its asks
+ * are then decided as someone else's turn, which runs reads only (security/turn-input-party.ts).
  */
 function startedBy(invocation: GatewayMethodInvocation): TurnInputParty {
   const actor = invocation.context.actor;
-  if (actor !== undefined && actor.class === 'owner' && actor.agentFor === undefined) return { party: 'owner' };
+  if (isTheUser(actor)) return { party: 'owner' };
   return { party: 'other', who: actor ? `an outside coding agent started by ${actor.class} ${actor.id}` : 'an outside coding agent started by a caller with no identity' };
 }
 

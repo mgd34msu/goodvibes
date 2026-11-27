@@ -153,18 +153,12 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
   }
 
   const { user } = authResult;
-  // The first-run file's generated password is for the first sign-in only: that sign-in sets the owner's own password
-  // (`newPassword`), which removes the file and retires the generated one (UserAuthManager.rotatePassword). The
-  // generated pair alone never makes a session: a process that read the file is not the owner signing in.
-  if (authResult.usedBootstrapCredential) {
-    const chosen = typeof body.newPassword === 'string' ? body.newPassword : '';
-    if (!chosen) {
-      return jsonErrorResponse({
-        error: 'Set your own password to finish the first sign-in', code: FIRST_SIGN_IN_SETS_PASSWORD,
-        state: 'this is the generated first-run password: it signs in only once, by setting a password of your own; no session was made',
-        next: ['Sign in again with the same username and password and a new password of your own (newPassword, at least 8 characters)'],
-      }, { status: 409 });
-    }
+  // The first sign-in with the first-run file's generated pair makes a session, as released: nothing forces a new password.
+  // A `newPassword` sent with it (the user choosing their own) is set (UserAuthManager.rotatePassword), which removes the
+  // file and retires the generated one; a refused one is said and nothing is made. `FIRST_SIGN_IN_SETS_PASSWORD` is
+  // answered only for that sent password, never for its absence.
+  const chosen = typeof body.newPassword === 'string' ? body.newPassword : '';
+  if (authResult.usedBootstrapCredential && chosen) {
     if (chosen === password) {
       return jsonErrorResponse({
         error: 'Choose a password of your own', code: FIRST_SIGN_IN_SETS_PASSWORD,
@@ -181,7 +175,7 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
     }
     logger.info('First sign-in: the owner set their own password; the first-run file was removed and its password retired', { username: user.username });
   }
-  const session = deps.userAuth.createSession(user.username);
+  const session = deps.userAuth.createSession(user.username, { viaBootstrapCredential: authResult.usedBootstrapCredential && !chosen });
   authSuccessTotal.add(1);
   logger.info('AUTH_SUCCEEDED', { type: 'AUTH_SUCCEEDED', requestId, username: user.username, clientIp: clientAddress, method: 'password', source: deps.source });
   if (deps.runtimeBus) {
@@ -193,7 +187,7 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
   // nothing signs in with it: while the user it names still has the generated
   // password, the file is that password (deleting it withdraws it), so another
   // user's sign-in never takes it away.
-  if (deps.userAuth.retireStaleBootstrapCredential()) {
+  if (!(authResult.usedBootstrapCredential && !chosen) && deps.userAuth.retireStaleBootstrapCredential()) {
     logger.info('Bootstrap credential file retired: the user it names has a password of its own', { username: user.username });
   }
 

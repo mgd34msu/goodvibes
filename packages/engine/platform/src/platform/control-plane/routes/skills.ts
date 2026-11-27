@@ -98,8 +98,9 @@ function writerOf(invocation: GatewayMethodInvocation): MemoryAuthor {
   const caller = { actor, credentialKind: invocation.context.credentialKind ?? undefined, registration: invocation.context.call?.registration,
     daemonHosted: invocation.context.call?.daemonHosted === true };
   // Their registered program or their own command line (method-owner-decision.ts `makesOwnerOnlyAct`, the one test).
-  if (ownersAgentProgram(caller) || (caller.registration !== undefined && makesOwnerOnlyAct(caller))) return { kind: 'owner-model' };
-  return { kind: 'other', who: `a caller that is not the owner in person (${actor ? `${actor.class} ${actor.id}` : 'not named'})` };
+  // Any credential of the user without a press writes as their program does (their model's words); never someone else's.
+  if (ownersAgentProgram(caller) || makesOwnerOnlyAct(caller)) return { kind: 'owner-model' };
+  return { kind: 'other', who: `a caller that is not the user (${actor ? `${actor.class} ${actor.id}` : 'not named'})` };
 }
 
 /**

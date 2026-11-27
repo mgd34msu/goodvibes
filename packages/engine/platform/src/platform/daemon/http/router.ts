@@ -18,7 +18,7 @@ import type { UserAuthManager } from '../../security/user-auth.js';
 import { OPERATOR_SESSION_COOKIE_NAME, buildIdentityMarkerCookie, buildOperatorSessionCookie, extractOperatorAuthToken, readIdentityMarker, type CredentialRefusal } from '../../security/http-auth.js';
 import { webAppLink } from '../web-app-link.js';
 import { callerKey, LOCAL_OWNER_PRINCIPAL } from '../../pairing/principal-ids.js';
-import { ownersOwnPress } from '../method-owner-decision.js';
+import { isTheUser } from '../method-owner-decision.js';
 import type { AgentManager } from '../../tools/agent/index.js';
 import {
   normalizeAtSchedule,
@@ -1253,10 +1253,10 @@ export class DaemonHttpRouter {
         // Whose request it is, as the work it starts carries it: the owner's own press is theirs (method-owner-decision.ts).
         requestParty: (request) => {
           const principal = this.principalOf(request);
-          const call = this.checkedCallOf(request);
           const actor = principal?.actor;
-          if (actor && ownersOwnPress({ actor, credentialKind: principal?.credentialKind, registration: call?.registration, personAsked: false })) return { party: 'owner' as const };
-          return { party: 'other' as const, who: `a caller that is not the owner in person (${actor ?`${actor.class} ${actor.id}` : 'unknown'})`,
+          // The user, from any credential: what they start is theirs, on every device (a guest or a peer never reaches here).
+          if (isTheUser(actor)) return { party: 'owner' as const };
+          return { party: 'other' as const, who: `a caller that is not the user (${actor ?`${actor.class} ${actor.id}` : 'unknown'})`,
             ...(principal?.principalId ? { madeFor: principal.principalId } : {}) };
         },
         sessionBroker: buildRouterSessionBrokerAdapter(this.context.sessionBroker),

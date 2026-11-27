@@ -25,7 +25,7 @@ import { readInvocationParams, requireStringValue } from './invocation-params.js
 import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 import { callerKey, isLocalOwnerCaller } from '../../pairing/principal-ids.js';
 import { registrantMayName } from '../session-broker-sessions.js';
-import { ownersProgramCaller } from '../../daemon/method-owner-decision.js';
+import { isTheUser, ownersProgramCaller } from '../../daemon/method-owner-decision.js';
 
 export type OwnerInboxGatewayService = Pick<OwnerInbox, 'listNow' | 'listPageNow' | 'get' | 'answer' | 'postNow' | 'withdraw' | 'reportDelivery' | 'postedBy' | 'revision' | 'subscribe' | 'viewerOf'>;
 
@@ -91,7 +91,7 @@ function answerSource(invocation: GatewayMethodInvocation): OwnerAnswerSource {
     actor: actor !== undefined && actor.class !== 'peer' && actor.class !== 'system' ? actor.id : invocation.context.principalId ?? 'operator',
     surface: invocation.context.clientKind ?? 'web',
     // Whether the owner in person answered, from the actor the transport established (never a model acting for them).
-    ...(actor?.class === 'owner' && actor.agentFor === undefined ? { owner: true as const } : {}),
+    ...(isTheUser(actor) ? { owner: true as const } : {}),
   };
 }
 

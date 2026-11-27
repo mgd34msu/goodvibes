@@ -870,8 +870,8 @@ async function handleInvokeRemotePeer(context: DaemonRemoteRouteContext, peerId:
 }
 
 async function handleCancelRemoteWork(context: DaemonRemoteRouteContext, workId: string, req: Request): Promise<Response> {
-  // A project act (`sessions.write`), admitted by its effects; the one reach rule held a caller below an admin to work
-  // queued for a session or schedule of its own before this runs.
+  const admin = context.requireAdmin(req);
+  if (admin) return admin;
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;
   const input = remoteBodySchemas.operatorNote.parse(body);

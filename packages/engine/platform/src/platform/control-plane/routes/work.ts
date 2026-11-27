@@ -30,6 +30,7 @@ import { WORK_LEDGER_READ_SCOPE } from '../method-catalog-work-ledger.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import { requireNativeOwner } from './native-owner.js';
+import { isTheUser } from '../../daemon/method-owner-decision.js';
 
 const EXECUTION_SCOPES = ['read:work-ledger', 'write:fleet'] as const;
 
@@ -130,10 +131,13 @@ function readable(invocation: GatewayMethodInvocation): void {
  * project are read, never changed, by it. An admin's act is decided as before (the owner-only and project rules).
  */
 function ownWork(invocation: GatewayMethodInvocation, plans: WorkPlans | undefined, workId: string, title: string): void {
+  // What one credential of the user starts is the user's on every credential: any credential of the user acts on any
+  // work. Only a caller that is not the user (a guest, a peer) acts on work it caused itself.
+  if (isTheUser(invocation.context.actor)) return;
   if (invocation.context.admin === true) return;
   const cause = plans?.causeOf(workId);
   if (cause?.madeFor !== undefined && cause.madeFor === invocation.context.principalId) return;
-  throw new GatewayVerbError(`"${title}" was left as it is: it is not work this caller asked for, and a device, a member or an outside agent acts only on work it asked for itself. Nothing was changed.`,
+  throw new GatewayVerbError(`"${title}" was left as it is: it is not work this caller asked for, and a caller that is not the user acts only on work it asked for itself. Nothing was changed.`,
     'WORK_NOT_YOURS', 403, 'work');
 }
 

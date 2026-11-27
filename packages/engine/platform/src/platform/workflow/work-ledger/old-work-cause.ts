@@ -1,8 +1,8 @@
 /**
  * Work made before GoodVibes kept who asked for each piece of work (work-plans.ts `WorkCause`) has no recorded cause. It
  * is the owner's, with nothing asked: at the start of this project's Work each such piece of work is recorded as the
- * owner's own (`WorkPlans.ownOldWork`), so it reads and runs as theirs, as it did before; a caller that is not the owner
- * still cannot start, resume or claim it (`WorkPlans.noteCause` refuses it).
+ * owner's own (`WorkPlans.ownOldWork`), so it reads and runs as theirs, as it did before; nothing refuses an act of the
+ * user's on it, from any credential (`WorkPlans.noteCause`).
  */
 import { randomUUID } from 'node:crypto';
 import type { WorkLedgerAuthority, WorkLedgerService } from './types.js';

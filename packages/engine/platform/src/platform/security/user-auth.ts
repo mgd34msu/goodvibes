@@ -1332,11 +1332,10 @@ export class UserAuthManager {
   }
 
   /**
-   * `roles`: absent, a member (no administrative scopes); an admin only when the owner names the role when making
-   * the user. `scopes`: the operator scopes the user holds, narrower than its role's default set; absent, the role's
-   * set applies.
+   * `roles`: absent, an admin (as released); a user named with another role holds that role. `scopes`: the operator
+   * scopes the user holds, narrower than its role's default set; absent, the role's set applies.
    */
-  addUser(username: string, password: string, roles: readonly string[] = ['member'], scopes?: readonly string[]): AuthUserRecord {
+  addUser(username: string, password: string, roles: readonly string[] = ['admin'], scopes?: readonly string[]): AuthUserRecord {
     const normalized = username.trim();
     if (!normalized) throw new Error('Username is required.');
     const reserved = reservedPrincipalForm(normalized);
@@ -1366,9 +1365,6 @@ export class UserAuthManager {
     const normalized = username.trim();
     const existing = this.users.get(normalized);
     if (!existing) throw new Error(`Unknown local auth user: ${normalized}`);
-    if (existing.owner === true && scopes !== null && !scopes.includes('*')) {
-      throw new Error(`Cannot narrow ${normalized}: it is the owner's account, and the owner holds every scope. Nothing was changed.`);
-    }
     const { scopes: _previous, ...rest } = existing;
     const next: AuthUser = scopes === null ? rest : { ...rest, scopes: normalizeScopeList(scopes) };
     const previous = this.users;
@@ -1385,10 +1381,6 @@ export class UserAuthManager {
     if (!existing) return false;
     if (this.users.size <= 1) {
       throw new Error('Cannot delete the last local auth user.');
-    }
-    // The owner is the one recorded owner: removing them would leave the daemon with none (and no other user becomes the owner).
-    if (existing.owner === true) {
-      throw new Error(`Cannot delete ${normalized}: it is the owner's account, and the daemon has one owner. Nothing was deleted.`);
     }
     // No session without the admin role can pass the admin check, so the last admin is protected too.
     const isAdmin = (user: AuthUser): boolean => user.roles?.includes('admin') === true;
@@ -1418,16 +1410,12 @@ export class UserAuthManager {
    * it is deleted: the generated one-time password is retired the moment the
    * owner sets their own, and the chosen password is never written in clear.
    */
-  rotatePassword(username: string, nextPassword: string, by?: { readonly ownerHimself: boolean }): void {
+  rotatePassword(username: string, nextPassword: string, _by?: { readonly ownerHimself: boolean }): void {
     const normalized = username.trim();
     const existing = this.users.get(normalized);
     if (!existing) throw new Error(`Unknown local auth user: ${normalized}`);
-    // The owner's password is changed only by the owner in person (their sign-in, or their own verified program), as their
-    // account is never deleted or narrowed by anyone: whoever set it would sign in as the owner. A request names who asks
-    // (`by`); the owner's own sign-in setting their first password and a command at the machine pass no request.
-    if (existing.owner === true && by !== undefined && !by.ownerHimself) {
-      throw new Error(`The owner's password (${normalized}) is changed only by the owner in person, signed in or from their own program; this caller is not the owner. Nothing was changed.`);
-    }
+    // Every account is the user's: any credential of the user sets any account's password (`_by` is kept for callers that
+    // still name who asks; nothing reads it).
     if (!nextPassword || nextPassword.length < 8) throw new Error('Password must be at least 8 characters.');
     // A chosen password is the user's own: no longer tied to the bootstrap file.
     const { bootstrap: _generated, ...rest } = existing;

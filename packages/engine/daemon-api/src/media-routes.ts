@@ -156,12 +156,16 @@ export function createDaemonMediaRouteHandlers(
       return Response.json({ providers: status.providers, ...(status.defaultProviderId === null ? {} : { defaultProviderId: status.defaultProviderId }) });
     },
     postWebSearch: async (request) => handleWebSearch(context, request),
-    // Files are project acts (effect-authority.ts `artifacts.read`, `artifacts.write`), admitted by their effects at the
-    // router's binding gate: a caller below an admin lists, reads and stores only files it made itself (the one reach
-    // rule, control-plane/caller-reach.ts: a file is its maker's, `createdBy`), and the list is filtered to those.
-    getArtifacts: () => Response.json({ artifacts: context.artifactStore.list() }),
+    // Listing, reading and storing files take the admin role of the credential, as released.
+    getArtifacts: (request) => {
+      const admin = context.requireAdmin(request);
+      if (admin) return admin;
+      return Response.json({ artifacts: context.artifactStore.list() });
+    },
     postArtifact: async (request) => handleArtifactCreate(context, request),
-    getArtifact: (artifactId) => {
+    getArtifact: (artifactId, request) => {
+      const admin = context.requireAdmin(request);
+      if (admin) return admin;
       const artifact = context.artifactStore.get(artifactId);
       return artifact
         ? Response.json({ artifact })
@@ -481,8 +485,8 @@ function withoutCallerStamps(metadata: Record<string, unknown> | undefined): Rec
 }
 
 async function handleArtifactCreate(context: DaemonMediaRouteContext, req: Request): Promise<Response> {
-  // A project act (`artifacts.write`), admitted by its effects; a daemon-local path or file: URI is held to the caller's
-  // projects by the folder check (the method's `daemonFiles`), and reaching a private host stays an admin's (below).
+  const admin = context.requireAdmin(req);
+  if (admin) return admin;
   // Who stores it is who it belongs to (platform control-plane/caller-reach.ts): the authenticated caller, never the body.
   const createdBy = context.callerPrincipal?.(req);
   if (isArtifactUploadRequest(req)) {
@@ -567,7 +571,8 @@ function handleArtifactDiscard(context: DaemonMediaRouteContext, artifactId: str
 const INLINE_SAFE_MEDIA_TYPE = /^(?:image\/(?:png|jpe?g|gif|webp|avif|bmp)|audio\/[a-z0-9.+-]+|video\/[a-z0-9.+-]+|text\/plain|application\/json)$/;
 
 async function handleArtifactContent(context: DaemonMediaRouteContext, artifactId: string, req: Request): Promise<Response> {
-  // A project act (`artifacts.read`): the one reach rule held the caller to a file it may reach before this runs.
+  const admin = context.requireAdmin(req);
+  if (admin) return admin;
   // Only an unknown id is "not found"; a failure reading a known artifact is a server fault.
   if (!context.artifactStore.get(artifactId)) return jsonErrorResponse({ error: `Unknown artifact: ${artifactId}` }, { status: 404 });
   try {

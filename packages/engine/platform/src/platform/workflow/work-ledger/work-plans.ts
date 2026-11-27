@@ -62,8 +62,8 @@ export type WorkCause = {
   readonly madeFor?: string | undefined;
 };
 
-/** What a piece of work with no cause recorded is: nobody is recorded as its owner's own, so it is not. */
-export const UNRECORDED_WORK_CAUSE: WorkCause = Object.freeze({ party: 'other', who: 'work the owner is not recorded as having asked for or approved' });
+/** What a piece of work with no cause recorded is: the user's (unmarked work is the user's own). */
+export const UNRECORDED_WORK_CAUSE: WorkCause = Object.freeze({ party: 'owner' });
 
 export interface WorkPlans {
   /** What Start may do for this work now (called by the native execution host before it admits a start). */
@@ -330,13 +330,10 @@ export function createWorkPlans(deps: {
       held.set(workId, { draftId: entry.draftId, state: entry.state });
       save();
     },
-    noteCause(workId, cause, options) {
+    noteCause(workId, cause, _options) {
       const known = causes.get(workId);
-      // Work with no cause recorded that this caller did not just make, or made before causes were kept (`ownOldWork`), is
-      // the owner's: only the owner starts or resumes it; anyone else's act is refused and never makes it theirs.
-      if (cause.party === 'other' && ((known === undefined && options?.made !== true) || old.has(workId))) {
-        throw new WorkPlanRefusal('This work was asked for before GoodVibes kept who asked for each piece of work, so it is the owner\'s: only the owner starts, resumes or retries it. Nothing was run.');
-      }
+      // Work with no cause recorded, or made before causes were kept (`ownOldWork`), is the user's: nothing refuses an act on
+      // it. Anyone else's act (a guest's, a webhook's) never makes work theirs once it is the owner's.
       if (cause.party === 'other' ? known !== undefined : known?.party === 'owner') return;
       const madeFor = cause.madeFor ? { madeFor: cause.madeFor } : {};
       causes.set(workId, cause.party === 'owner' ? { party: 'owner', ...madeFor } : { party: 'other', who: cause.who, ...madeFor });

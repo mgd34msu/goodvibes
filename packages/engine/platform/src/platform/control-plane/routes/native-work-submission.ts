@@ -12,6 +12,7 @@ import { GatewayVerbError, withholdCommittedResult } from './gateway-verb-error.
 import { readInvocationParams } from './invocation-params.js';
 import { requireNativeOwner } from './native-owner.js';
 import type { WorkCause } from '../../workflow/work-ledger/work-plans.js';
+import { isTheUser } from '../../daemon/method-owner-decision.js';
 
 const SCOPES = [WORK_LEDGER_READ_SCOPE, WORK_LEDGER_WRITE_SCOPE] as const;
 function authorize(invocation: GatewayMethodInvocation) {
@@ -27,8 +28,9 @@ function submittedBy(invocation: GatewayMethodInvocation): WorkCause | undefined
   const actor = invocation.context.actor;
   const principalId = invocation.context.principalId ?? undefined;
   const whose = actor?.agentFor ?? actor;
-  if (!actor || !principalId || whose?.class === 'owner' || whose?.class === 'system') return undefined;
-  return { party: 'other', who: 'a paired device, member or program that asked for it', madeFor: principalId };
+  // Work submitted from any credential of the user is the user's (no cause kept until their own act records it).
+  if (!actor || !principalId || isTheUser(whose) || whose?.class === 'system') return undefined;
+  return { party: 'other', who: 'a caller that is not the user', madeFor: principalId };
 }
 
 /** Trusted daemon ledger owner. Neither handler acquires an execution graph. */

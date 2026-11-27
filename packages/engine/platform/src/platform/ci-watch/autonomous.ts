@@ -45,8 +45,8 @@ export interface CiRepairRequest {
  */
 export function startAdmittedCiRepair(host: ExternalPermissionHost | undefined, input: CiRepairRequest, starter: FixSessionStarter): Promise<FixSessionStartOutcome> {
   // Decided, and started, as the party whose input made the watch (its pushing turn's: the owner's own chat is theirs),
-  // whoever checks it now; a watch with none recorded is someone else's, so its repair only reads and is refused.
-  const party = input.subscription.party ?? { party: 'other' as const, who: 'a CI watch with no record of whose push made it' };
+  // whoever checks it now; a watch with none recorded is the user's, so its repair is decided under their mode.
+  const party = input.subscription.party ?? { party: 'owner' as const };
   return withInputParty(party, () => startAdmittedCiRepairAs(host, input, starter));
 }
 

@@ -7,19 +7,18 @@
  *  - The OWNER's turn (their terminal conversation, their web chat, a schedule or trigger they set up, work they asked
  *    for or approved in person, a hosted session they typed into): commands run by the one rule every terminal conversation has, the shared sandbox
  *    setting and their mode; an ask nobody is present for waits for them in Waiting for you.
- *  - A turn driven by SOMEONE ELSE's input (a message that arrived on a channel, a guest the channel admitted, a paired
- *    device or signed-in person who is not the owner, a webhook, input an outside caller put into a hosted session, work
- *    anyone but the owner caused and the owner has not approved): it runs reads only (every other tool call is refused at
- *    admission, gate/classify.ts), no command outside a real sandbox and writes no file, whatever the mode
- *    (added after a daemon-hosted turn nobody watched reached the owner's tmux through an unsandboxed command).
+ *  - A turn driven by SOMEONE ELSE's input (a message that arrived on a channel from a stranger, a guest the channel
+ *    admitted, a webhook, input an outside caller put into a hosted session): it runs reads only (every other tool call
+ *    is refused at admission, gate/classify.ts), no command outside a real sandbox and writes no file, whatever the mode.
+ *    A sign-in, a device or the machine's token is the user, never someone else.
  *
  * Read from what the transport established, never from anything a message or the model wrote:
- *  - the turn in scope (security/turn-boundary.ts): the channel surface a turn was started for, the guest or other
- *    person it acts for (`actor`), the origin a hosted session's input carries;
- *  - a host that runs its own turn loop without that scope (the web chat) marks a turn whose sender is not the owner
- *    with {@link withOtherPartyInput}, from the credential that sent the message (the chat's registrant).
+ *  - the turn in scope (security/turn-boundary.ts): the channel surface a turn was started for, the guest it acts for
+ *    (`actor`), the origin a hosted session's input carries;
+ *  - a host that runs its own turn loop without that scope marks a turn whose sender is a stranger or a guest with
+ *    {@link withOtherPartyInput}.
  *
- * Unknown leans to someone else: a surface not named below as the owner's is someone else's.
+ * Work that nothing names (no turn, no mark) is the user's.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -50,27 +49,22 @@ const OWNER: TurnInputParty = Object.freeze({ party: 'owner' });
 
 /**
  * Work that no turn and no mark names (a callback that lost its turn's scope, a queue drained by other code, a run no
- * host marked) is someone else's: unknown leans to someone else. A process whose unmarked work is the person at its own
- * keyboard (the terminal app, the Agent: `declareUnmarkedWorkIsOwners`) says so once at start; the daemon never does,
- * and marks every run of the owner's it starts (their schedules and triggers, their Work, their calls over the wire).
+ * host marked) is the user's: someone else's input is only a channel stranger's, a guest's or a webhook's (a surface that
+ * says so), never what nothing names. `declareUnmarkedWorkIsOwners` is kept and changes nothing.
  */
-const UNMARKED: TurnInputParty = Object.freeze({ party: 'other', who: 'work that no turn or mark names as the owner\'s' });
-let unmarkedIsOwners = false;
-
-/** The terminal programs: outside any turn, the work in this process is the owner's own at their keyboard. */
 export function declareUnmarkedWorkIsOwners(): void {
-  unmarkedIsOwners = true;
+  // Unmarked work is the user's whether or not a program says so.
 }
 
 function unmarked(): TurnInputParty {
-  return unmarkedIsOwners ? OWNER : UNMARKED;
+  return OWNER;
 }
 
 /** The owner's own surfaces: their terminal programs, their web view, the daemon itself. (Their schedules are marked as theirs.) */
 const OWNER_SURFACES: ReadonlySet<string> = new Set(['tui', 'cli', 'terminal', 'agent', 'web', 'webui', 'daemon']);
 
-/** People and programs whose turns are the owner's. */
-const OWNER_ACTOR_CLASSES: ReadonlySet<ActorClass> = new Set(['owner', 'system']);
+/** People and programs whose turns are the user's: every class a credential of the user is, and the program itself. */
+const OWNER_ACTOR_CLASSES: ReadonlySet<ActorClass> = new Set(['owner', 'admin', 'script', 'member', 'device', 'system']);
 
 const marked = new AsyncLocalStorage<TurnInputParty>();
 

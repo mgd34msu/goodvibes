@@ -80,11 +80,10 @@ const integrationBodySchemas = createRouteBodySchemaRegistry({
     const password = readOptionalStringField(body, 'password');
     if (!username) return jsonErrorResponse({ error: 'Missing username' }, { status: 400 });
     if (!password) return jsonErrorResponse({ error: 'Missing password' }, { status: 400 });
-    // Omitting `roles` creates a member: a sign-in without administrative
-    // scopes. An admin is made only when the owner in person names the role (their
-    // choice when making it; making a sign-in is the owner's own act). A `roles` that
-    // is present but empty or malformed is refused.
-    let roles: readonly string[] = ['member'];
+    // Omitting `roles` creates an admin (the long-standing default). A `roles`
+    // that is present but empty or malformed is refused: reading it as "absent"
+    // would hand an admin account to a caller who asked for no roles.
+    let roles: readonly string[] = ['admin'];
     if (Object.hasOwn(body, 'roles')) {
       const requested: unknown = body.roles;
       const entries = Array.isArray(requested) && requested.length <= MAX_LOCAL_AUTH_ROLES && requested.every((entry) => typeof entry === 'string' && entry.trim().length > 0)
@@ -92,7 +91,7 @@ const integrationBodySchemas = createRouteBodySchemaRegistry({
         : [];
       if (entries.length === 0) {
         return jsonErrorResponse({
-          error: `roles must be an array of 1 to ${MAX_LOCAL_AUTH_ROLES} non-empty role names. Omit roles to create a member (no administrative scopes); name "admin" to make an admin.`,
+          error: `roles must be an array of 1 to ${MAX_LOCAL_AUTH_ROLES} non-empty role names. Omit roles to create an admin user.`,
           code: 'INVALID_ARGUMENT',
         }, { status: 400 });
       }
@@ -350,24 +349,14 @@ export function createDaemonIntegrationRouteHandlers(
     },
     // Canonical-store record CRUD/search. The daemon is the single writer; a client
     // surface reaches its store ONLY through these routes and never opens the file.
-    // Writes are project acts (effect-authority.ts `memory.write`), admitted by their effects at the router's binding
-    // gate: a caller below an admin adds a "this project" record only in a project the owner gave it (the record's project
-    // is the one its call names, checked here; never one the body says), and changes only a record it wrote itself (the
-    // author keeps its principal, `madeBy`: control-plane/caller-reach.ts `OWN_RECORD_CHANGES` refuses any other before this runs).
+    // Writes are admin-only, like the gateway verbs for the same operations (the admin role of the credential, as released).
     postMemoryRecordAdd: async (req) => {
-      const below = context.requireAdmin(req) !== null;
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
-      const added = parseMemoryRecordAddBody(body);
-      if (added instanceof Response) return added;
-      let parsed = added;
-      if (below) {
-        const named = readCallContext(req)?.project ?? (typeof body.workingDirectory === 'string' && body.workingDirectory.trim() ? body.workingDirectory.trim() : undefined);
-        const refusal = !named ? 'a paired device, a member or an outside agent adds a memory record only in a project the owner gave it, and this call named none'
-          : context.callerProjectRefusal ? context.callerProjectRefusal(req, named) : 'this daemon has no rule for which projects a caller may name';
-        if (refusal) return Response.json({ error: `Not done: ${refusal}. Nothing was kept.`, code: 'PROJECT_NOT_ALLOWED', category: 'authorization', status: 403 }, { status: 403 });
-        parsed = { ...added, scope: 'project', project: context.memoryProjectOf?.(named!) ?? named! };
-      }
+      const parsed = parseMemoryRecordAddBody(body);
+      if (parsed instanceof Response) return parsed;
       const reviewed = parsed.review ? { ...parsed, review: withAuthenticatedReviewer(context, req, parsed.review) } : parsed;
       // Who wrote it is the authenticated caller's (never the body's), and a session it names is kept as where the
       // record came from only when this caller registered it.
@@ -395,6 +384,8 @@ export function createDaemonIntegrationRouteHandlers(
         : jsonErrorResponse({ error: 'Unknown memory record', code: MEMORY_RECORD_NOT_FOUND_CODE }, { status: 404 });
     },
     postMemoryRecordReview: async (id, req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
       const parsed = parseMemoryRecordReviewBody(body);
@@ -411,7 +402,9 @@ export function createDaemonIntegrationRouteHandlers(
       }
     },
     // `{ deleted: false }` for an unknown id is the documented answer (see memory.records.delete).
-    deleteMemoryRecord: async (id) => {
+    deleteMemoryRecord: async (id, req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
       try {
         const deleted = context.memoryRegistry.delete(id);
         if (deleted) await context.memoryRegistry.saved();
@@ -441,6 +434,8 @@ export function createDaemonIntegrationRouteHandlers(
       return Response.json({ results: await context.memoryRegistry.searchSemantic(scoped) });
     },
     postMemoryRecordUpdate: async (id, req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
       const patch = parseMemoryRecordUpdateBody(body);
@@ -463,6 +458,8 @@ export function createDaemonIntegrationRouteHandlers(
       return Response.json({ links: context.memoryRegistry.linksFor(id) });
     },
     postMemoryRecordLink: async (id, req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
       const input = parseMemoryLinkBody(body);

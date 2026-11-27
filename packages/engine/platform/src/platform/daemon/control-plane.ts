@@ -61,7 +61,7 @@ const SETTING_WRITE_METHOD_IDS: ReadonlySet<string> = new Set(['config.set', 'co
 import { methodCallRisk, OWNER_ONLY_WHERE, ownerOnlyMethodArea, riskOfDescriptor, VALUE_DECIDED_METHOD_IDS, type MethodRisk } from '../control-plane/method-risk.js';
 import { modelNeverMakes } from '../security/effect-authority.js';
 import { AGENT_CREDENTIAL_OWNER_ONLY_WORDS, ANSWER_METHOD_IDS, callerAdmitted, methodCallPutToOwner, mintsAgentCredential, nestedAnswerAdmitted, OWNER_ANSWERS_ONLY, OWNER_ANSWERS_ONLY_WORDS, OWNER_DECISION_NEEDED, OWNER_DEVICE_ANSWER_METHOD_IDS, ownerAnswers, ownerHimself, ownersAgentProgram, ownersDevice, ownersOwnSession, partyOfCaller, wellFormedActor,
-  makesOwnerOnlyAct, MODEL_NEVER, modelNeverWords, OWNER_ONLY_ACT, ownerOnlyActWords, ownersCommandLine } from './method-owner-decision.js';
+  makesOwnerOnlyAct, MODEL_NEVER, modelNeverWords, OWNER_ONLY_ACT, ownerOnlyActWords } from './method-owner-decision.js';
 import { asCallOutsideTurn, turnInputParty } from '../security/turn-input-party.js';
 import { decideInProject } from '../permissions/call-project.js';
 import { withFirstUseCall, type FirstUseCall } from './capability-owner-gate.js';
@@ -2044,7 +2044,7 @@ export class DaemonControlPlaneHelper {
                 // Whether the one rule admits this caller at once (method-owner-decision.ts `callerAdmitted`).
                 ...(VALUE_DECIDED_METHOD_IDS.has(descriptor.id) ? { ownerAdmitted } : {}),
                 // A credential write keeps who made it and how it was decided (in process only; never from a body).
-                ...(!heldMethod && SETTING_WRITE_METHOD_IDS.has(descriptor.id) ? { settingAct: this.settingActOf(input.authToken, context, upstreamAct, ownerApproved, ownerHimself(callerFacts) || ownersCommandLine(callerFacts)) } : {}),
+                ...(!heldMethod && SETTING_WRITE_METHOD_IDS.has(descriptor.id) ? { settingAct: this.settingActOf(input.authToken, context, upstreamAct, ownerApproved, ownerHimself(callerFacts)) } : {}),
               } }),
           },
         }));
@@ -2161,7 +2161,7 @@ export class DaemonControlPlaneHelper {
       // A route whose class depends on its value is told whether the one rule admits this caller at once.
       ...(VALUE_DECIDED_METHOD_IDS.has(descriptor.id) && ownerAdmitted ? { ownerAdmitted: true as const } : {}),
       // A settings write keeps who made it and how it was decided (a machine group carries the record to every member).
-      ...(SETTING_WRITE_METHOD_IDS.has(descriptor.id) ? { settingAct: this.settingActOf(input.authToken, context, upstreamAct, ownerApproved, ownerHimself(callerFacts) || ownersCommandLine(callerFacts)) } : {}),
+      ...(SETTING_WRITE_METHOD_IDS.has(descriptor.id) ? { settingAct: this.settingActOf(input.authToken, context, upstreamAct, ownerApproved, ownerHimself(callerFacts)) } : {}),
       // Decided above (method-owner-decision.ts): the route serves it without deciding it again.
       decided: true,
     }));

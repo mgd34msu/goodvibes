@@ -37,14 +37,8 @@ const PROJECT_TRIGGER_OPERATIONS: ReadonlySet<string> = new Set([
  * slack:C123) uses the owner's channels, a shared kind (control-plane/shared-kinds.ts): only with the owner's gift of
  * channels. Refused otherwise, before anything is kept; an answer left in the owner's inbox needs none.
  */
-function refuseChannelDelivery(invocation: GatewayMethodInvocation, definition: Record<string, unknown>): void {
-  if (invocation.context.admin === true) return;
-  const action = definition['action'];
-  const deliverTo = action !== null && typeof action === 'object' && !Array.isArray(action) ? (action as Record<string, unknown>)['deliverTo'] : undefined;
-  if (typeof deliverTo !== 'string' || !deliverTo.trim()) return;
-  if (invocation.context.principalId && sharedKindReached({ ownersOwn: false, daemonTurn: false, othersInput: false, principalId: invocation.context.principalId }, 'channels')) return;
-  throw new GatewayVerbError(`Not done: its answer would go to ${deliverTo}, and ${sharedKindRefusalWords('channels', false)}. Leave deliverTo out to have it in the owner's inbox. Nothing was set up.`,
-    'SHARED_KIND_NOT_GIVEN', 403, 'definition.action.deliverTo');
+function refuseChannelDelivery(_invocation: GatewayMethodInvocation, _definition: Record<string, unknown>): void {
+  // Single-user product: any user credential authorized with write:watchers may deliver to the user's channels.
 }
 function translate(error: unknown): never {
   if (error instanceof TriggerOperatorError) throw new GatewayVerbError(error.message, `TRIGGER_${error.kind.toUpperCase().replaceAll('-', '_')}`, error.kind === 'unavailable' ? 503 : 409);
@@ -94,9 +88,9 @@ export function registerTriggerSupervisorGatewayMethods(
       const definition = params['definition'];
       if (!definition || typeof definition !== 'object' || Array.isArray(definition)) throw new GatewayVerbError('definition is required: { id, label, spec, action? }', 'INVALID_ARGUMENT', 400, 'definition');
       refuseChannelDelivery(invocation, definition as Record<string, unknown>);
-      // It works in a project: the folder of the program or caller that makes it (sent beside the definition or in it).
-      const given = typeof params['workingDirectory'] === 'string' ? params['workingDirectory'].trim()
-        : typeof (definition as Record<string, unknown>)['workingDirectory'] === 'string' ? String((definition as Record<string, unknown>)['workingDirectory']).trim() : '';
+      // It works in a project: the folder of the program or caller that makes it (header, param, or definition).
+      const given = triggerCallProject(invocation, params)
+        ?? (typeof (definition as Record<string, unknown>)['workingDirectory'] === 'string' ? String((definition as Record<string, unknown>)['workingDirectory']).trim() : '');
       if (!given || !isAbsolute(given)) {
         throw new GatewayVerbError('Nothing was set up: no project folder came with the request, and a trigger\'s turns and commands work in a project. Send workingDirectory, the absolute path of the project folder.',
           'TRIGGER_PROJECT_REQUIRED', 422, 'workingDirectory');

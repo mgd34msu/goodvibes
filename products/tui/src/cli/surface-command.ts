@@ -179,7 +179,6 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
         }
         reached.push('controlPlane');
         enableFeatureFlags(config, getServerSurfaceFeatureFlags({ serverBacked: true, web: true }));
-        config.setDynamic('daemon.enabled', true);
         config.setDynamic('controlPlane.enabled', true);
       }
       config.setDynamic('web.enabled', enabled);
@@ -198,10 +197,8 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
         if (controlPlaneError) return refuse(controlPlaneError);
         reached.push('controlPlane');
       }
-      // control-plane on: serve other machines (the daemon must run for that);
-      // off: serve only this machine. The daemon itself stays as it is.
+      // control-plane on: serve other machines; off: serve only this machine.
       config.setDynamic('controlPlane.enabled', enabled);
-      if (enabled) config.setDynamic('daemon.enabled', true);
     }
     else {
       if (enabled && resolved.id === 'ntfy') {

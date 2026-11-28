@@ -28,7 +28,7 @@ export interface AgentReviewPacketShareToolArgs {
 }
 
 type AgentReviewPacketShareArtifactStore = Pick<ArtifactStore, 'get' | 'list' | 'readContent'>;
-type AgentReviewPacketShareChannelRouter = Pick<ChannelDeliveryRouter, 'deliver' | 'listStrategies' | 'strategyFor'>;
+export type AgentReviewPacketShareChannelRouter = Pick<ChannelDeliveryRouter, 'deliver' | 'listStrategies' | 'strategyFor'>;
 type AgentReviewPacketShareArtifact = ArtifactDescriptor | ArtifactRecord;
 
 interface ReviewPacketArchiveSummary {

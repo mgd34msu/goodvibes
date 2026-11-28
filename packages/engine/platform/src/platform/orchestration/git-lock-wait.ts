@@ -10,8 +10,10 @@
  * processes (no `/proc`), the commit waits for the lock file to go away.
  */
 import { existsSync, readdirSync, readFileSync, readlinkSync, rmSync, watch, type FSWatcher } from 'node:fs';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { logger } from '../utils/logger.js';
+
+const GIT_LOCK_RECHECK_MS = 500;
 
 /** Git's own words when another git process holds the index or a ref: `Unable to create '<path>.lock': File exists`. */
 export const GIT_LOCK_HELD = /Unable to create '([^'\n]*\.lock)': File exists/;
@@ -27,6 +29,33 @@ function repositoryOf(lockPath: string): string {
   return at >= 0 ? lockPath.slice(0, at) : dirname(lockPath);
 }
 
+/** Whether a git process's argv (`-C <dir>` / `--git-dir[=]<dir>`) targets `repository`. */
+function gitCmdlineTargetsRepository(entry: string, cwd: string, repository: string): boolean {
+  let raw: string;
+  try { raw = readFileSync(`/proc/${entry}/cmdline`, 'utf8'); } catch { return false; }
+  const args = raw.split('\0').filter(Boolean);
+  const gitDir = `${repository}/.git`;
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === '-C' && i + 1 < args.length) {
+      const target = resolvePath(cwd, args[i + 1]!);
+      if (target === repository || target.startsWith(`${repository}/`)) return true;
+      i++;
+    } else if (arg.startsWith('-C') && arg.length > 2) {
+      const target = resolvePath(cwd, arg.slice(2));
+      if (target === repository || target.startsWith(`${repository}/`)) return true;
+    } else if (arg === '--git-dir' && i + 1 < args.length) {
+      const target = resolvePath(cwd, args[i + 1]!);
+      if (target === gitDir || target === repository || target.startsWith(`${gitDir}/`)) return true;
+      i++;
+    } else if (arg.startsWith('--git-dir=')) {
+      const target = resolvePath(cwd, arg.slice('--git-dir='.length));
+      if (target === gitDir || target === repository || target.startsWith(`${gitDir}/`)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * The processes that hold the lock: one with the lock file open, or a git command running in its repository (a git
  * command closes its lock file a moment before it renames it into place). Undefined where processes cannot be seen.
@@ -40,7 +69,10 @@ export function gitLockHolders(lockPath: string): readonly number[] | undefined 
     try {
       if (readFileSync(`/proc/${entry}/comm`, 'utf8').trim() === 'git') {
         const cwd = readlinkSync(`/proc/${entry}/cwd`);
-        if (cwd === repository || cwd.startsWith(`${repository}/`)) { holders.push(Number(entry)); continue; }
+        if (cwd === repository || cwd.startsWith(`${repository}/`) || gitCmdlineTargetsRepository(entry, cwd, repository)) {
+          holders.push(Number(entry));
+          continue;
+        }
       }
       for (const fd of readdirSync(`/proc/${entry}/fd`)) {
         let target: string;
@@ -61,14 +93,17 @@ export type GitLockWait =
 /**
  * Waits until the lock file is gone (its holder finished), it is found stale (removed, and said), or `signal` stops
  * the wait. Every change in the lock's folder is looked at; the lock's own writes (its holder at work) are not.
+ * A lightweight unref'd re-check ensures a SIGKILL'd holder (which emits no directory change) still settles.
  */
 export function waitForGitLock(lockPath: string, signal: AbortSignal): Promise<GitLockWait> {
   return new Promise<GitLockWait>((resolve) => {
     let watcher: FSWatcher | undefined;
+    let recheck: ReturnType<typeof setInterval> | undefined;
     let ended = false;
     const end = (result: GitLockWait): void => {
       if (ended) return;
       ended = true;
+      if (recheck) { clearInterval(recheck); recheck = undefined; }
       watcher?.close();
       signal.removeEventListener('abort', onAbort);
       resolve(result);
@@ -96,7 +131,9 @@ export function waitForGitLock(lockPath: string, signal: AbortSignal): Promise<G
       // The lock's own writes (its holder at work) say it is held: only whether it is gone is looked at for them.
       watcher = watch(dirname(lockPath), (event, name) => look(event === 'rename' || name !== basename(lockPath)));
       watcher.on('error', () => look(true));
-    } catch { /* a folder that cannot be watched: the first look below still settles a released or stale lock; else the work's stop ends the wait */ }
+    } catch { /* a folder that cannot be watched: the first look and periodic re-check still settle a released or stale lock */ }
+    recheck = setInterval(() => look(true), GIT_LOCK_RECHECK_MS);
+    recheck.unref?.();
     look(true);
   });
 }

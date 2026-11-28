@@ -40,7 +40,7 @@ test('a daemon call in a project is decided under the project\'s stricter settin
   const decide = async (daemonMode: string): Promise<string> => {
     const config = new ConfigManager({ surfaceRoot: 'daemon', workingDir: own, homeDir: home, configDir: join(home, '.goodvibes', 'daemon', daemonMode), ownsDaemonTier: true });
     expect(config.setMany([{ key: 'permissions.mode' as ConfigKey, value: daemonMode }], localOwnerActor()).ok).toBe(true);
-    const gate = new PermissionManager(async (request) => { asked.push(String(request.workingDirectory).split('/').pop()); return { approved: true }; },
+    const gate = new PermissionManager(async (request) => { asked.push(String(request.workingDirectory).split('/').pop() ?? ''); return { approved: true }; },
       createPermissionConfigReader(config), new PolicyRuntimeState(), null, null, null, { workspaceTrust: null });
     const runs: string[] = [];
     for (const name of ['alpha', 'beta', 'gamma']) {

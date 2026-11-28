@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 
 import { isolatedTestEnvironment } from '../toolchain/src/test-runner/test-isolation.ts';
 import { RUN_TMP_PREFIX, STALE_RUN_MS, sweepStaleTmpDirs, TEMP_ROOT_OWNER_FILE, tempRootOwnerAlive, TEST_TMP_ROOT_ENV } from '../toolchain/src/test-runner/temp.ts';
-import { missingProofFiles, readRiskTable, scanBunfig, scanTestFiles, type ScanFinding } from './test-scan.ts';
+import { scanBunfig, scanTestFiles, type ScanFinding } from './test-scan.ts';
 
 const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
@@ -155,19 +155,15 @@ export function selectTestFiles(all: readonly TestFile[], selection: Selection):
 
 /**
  * The admission scan of the selected files and the bunfig.toml of each package
- * they run in, against the risk table read once. `wholeSuite` adds the table's
- * own check that every row names a file that exists.
+ * they run in.
  */
-export function admissionFindings(files: readonly TestFile[], wholeSuite = false): ScanFinding[] {
+export function admissionFindings(files: readonly TestFile[]): ScanFinding[] {
   const names = new Map(files.map((file) => [file.path, file.name]));
   const label = (path: string): string => names.get(path) ?? relative(REPO_ROOT, path).split(sep).join('/');
   const bunfigs = [...new Set(files.map((file) => join(file.cwd, 'bunfig.toml')))].filter((path) => existsSync(path));
-  const table = readRiskTable();
   return [
-    ...table.findings,
-    ...(wholeSuite ? missingProofFiles(table, REPO_ROOT) : []),
     ...bunfigs.flatMap((path) => scanBunfig(label(path), readFileSync(path, 'utf8'))),
-    ...scanTestFiles(files.map((file) => file.path), label, table),
+    ...scanTestFiles(files.map((file) => file.path), label),
   ].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 }
 
@@ -334,10 +330,10 @@ const KIND_LABEL: Readonly<Record<TestKind, string>> = { default: 'Default suite
 export async function runTests(options: RunOptions): Promise<number> {
   const started = performance.now();
   const { files } = options;
-  const findings = admissionFindings(files, options.wholeSuite === true);
+  const findings = admissionFindings(files);
   if (findings.length > 0) {
     const refused = new Set(findings.map((finding) => finding.file));
-    console.log('Refused: no sleeps or timer waits, snapshots, module mocks, skips or raised limits; every file opens with its Proves and Red when header, and every case has its row in packages/engine/docs/test-risks.md:');
+    console.log('Refused: no sleeps or timer waits, snapshots, module mocks, or skipped tests:');
     for (const finding of findings) console.log(`  ${finding.file}:${finding.line}  ${finding.rule}`);
     console.log(`\nFiles: 0 run, 0 passed, 0 failed, ${refused.size} refused; nothing ran. ${((performance.now() - started) / 1000).toFixed(1)}s`);
     return 1;

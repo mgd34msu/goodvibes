@@ -244,9 +244,12 @@ export type CheckpointsGatewayManager = Pick<WorkspaceCheckpointManager, 'list' 
     forProject?(folder: string): CheckpointsGatewayManager | undefined;
   };
 
-/** The project a call names (a program's or the web UI's call context), if any. */
-function callProjectOf(invocation: { readonly context?: { readonly call?: { readonly project?: string | undefined } | undefined } | undefined }): string | undefined {
-  return invocation.context?.call?.project;
+/** The project a call names (explicit workingDirectory/project param, else call context), if any. */
+function callProjectOf(
+  invocation: { readonly context?: { readonly call?: { readonly project?: string | undefined } | undefined } | undefined },
+  params?: Readonly<Record<string, unknown>>,
+): string | undefined {
+  return optionalString(params?.workingDirectory) ?? optionalString(params?.project) ?? invocation.context?.call?.project;
 }
 
 /** The manager for the session's workspace, else for the project the call names, or the default one. */
@@ -271,7 +274,7 @@ export function createCheckpointsListHandler(manager: CheckpointsGatewayManager)
     const sessionId = optionalString(params.sessionId);
     const since = optionalNumber(params.since, 'since');
     const limit = clampLimit(params.limit);
-    const scoped = managerFor(manager, sessionId, callProjectOf(invocation));
+    const scoped = managerFor(manager, sessionId, callProjectOf(invocation, params));
     const checkpoints = await scoped.list({ kind, sessionId, since, limit });
     // Present only while the last automatic retention sweep is failing, so a
     // store that is growing past its limits says why instead of looking healthy.
@@ -296,7 +299,7 @@ export function createSessionChangesHandler(manager: CheckpointsGatewayManager):
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const sessionId = requireStringValue(params.sessionId, 'sessionId');
-    const changes = await managerFor(manager, sessionId, callProjectOf(invocation)).sessionChanges(sessionId);
+    const changes = await managerFor(manager, sessionId, callProjectOf(invocation, params)).sessionChanges(sessionId);
     return changes;
   };
 }
@@ -306,7 +309,7 @@ export function createCheckpointsCreateHandler(manager: CheckpointsGatewayManage
     const body = readInvocationParams(invocation);
     const kind = validateCheckpointKind(body.kind, true);
     if (!kind) throw new GatewayVerbError('Missing required field: kind', 'INVALID_ARGUMENT', 400, 'kind');
-    const checkpoint = await managerFor(manager, optionalString(body.sessionId), callProjectOf(invocation)).create({
+    const checkpoint = await managerFor(manager, optionalString(body.sessionId), callProjectOf(invocation, body)).create({
       kind,
       label: optionalString(body.label),
       retentionClass: validateRetentionClass(body.retentionClass),
@@ -327,7 +330,7 @@ export function createCheckpointsDiffHandler(manager: CheckpointsGatewayManager)
     const params = readInvocationParams(invocation);
     const a = requireStringValue(params.a, 'a');
     const b = optionalString(params.b);
-    const holder = await managerHolding(manager, a, callProjectOf(invocation));
+    const holder = await managerHolding(manager, a, callProjectOf(invocation, params));
     const diff = await callOrHonestNotFound(() => holder.diff(a, b));
     return { diff };
   };
@@ -349,7 +352,7 @@ export function createCheckpointsRestorePreviewHandler(
     // `diff(id)` (second arg omitted) diffs the checkpoint against the live
     // working tree and routes through requireCheckpoint, so an unknown id is a
     // 404 here before any token is minted.
-    const holder = await managerHolding(manager, id, callProjectOf(invocation));
+    const holder = await managerHolding(manager, id, callProjectOf(invocation, body));
     const diff = await callOrHonestNotFound(() => holder.diff(id));
     const checkpoint = (await holder.list()).find((c) => c.id === id);
     const affectedPaths = diff.files;
@@ -391,7 +394,7 @@ export function createCheckpointsRestoreHandler(
     const takeBack = Array.isArray(body.takeBack) ? body.takeBack as string[] : undefined;
     // Whose changes this restore takes back (every session but the caller's own), read before anything is decided.
     const caller = invocation.context?.call?.sessionId ?? optionalString(body.sessionId);
-    const holding = await managerHolding(manager, id, callProjectOf(invocation));
+    const holding = await managerHolding(manager, id, callProjectOf(invocation, body));
     const others = await othersTakenBack(holding, id, caller, paths);
 
     if (confirmToken !== undefined) {
@@ -484,7 +487,7 @@ export function createCheckpointsRevertHunkPreviewHandler(
     // Diff paths are relative to the root the manager resolved at init (the
     // enclosing repository's top level when started in a subdirectory), in the
     // workspace of the session the diff came from.
-    const root = await managerFor(manager, sessionId, callProjectOf(invocation)).resolveRoot();
+    const root = await managerFor(manager, sessionId, callProjectOf(invocation, params)).resolveRoot();
     let content = '';
     const preview = previewHunkRevert(root, path, hunk, (read) => { content = read; });
     if (!preview.applies) {
@@ -552,7 +555,7 @@ export function createCheckpointsRevertHunkHandler(
     let receipt;
     let workspaceRoot = '';
     try {
-      receipt = await applyHunkRevert(managerFor(manager, sessionId, callProjectOf(invocation)), path, hunk, (content, root) => {
+      receipt = await applyHunkRevert(managerFor(manager, sessionId, callProjectOf(invocation, params)), path, hunk, (content, root) => {
         workspaceRoot = root;
         verify?.(content, root);
       });
@@ -610,7 +613,7 @@ export function createSessionCheckpointNoticeHandler(broker: SessionCheckpointNo
       throw new GatewayVerbError(`No shared session ${sessionId}: register it with sessions.register first. Nothing was announced.`, 'SESSION_NOT_FOUND', 404);
     }
     // A program's checkpoint is its project's (the call's project, already checked by the dispatch), and its session's.
-    const project = callProjectOf(invocation);
+    const project = callProjectOf(invocation, params);
     const identity = project !== undefined ? projectIdentityOf(project) : undefined;
     // What the notice is about, declared only once the daemon checked it (events/about.ts): the checkpoint is one that
     // project's store holds (the one store a project's programs and the daemon's runs share). A checkpoint it does not

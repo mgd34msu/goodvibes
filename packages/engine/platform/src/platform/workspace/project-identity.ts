@@ -41,6 +41,7 @@ function real(path: string): string {
  * one, and the first spelling this process saw for it is the one every later answer gives.
  */
 const spellingOf = new Map<string, string>();
+const SPELLING_CACHE_BOUND = 4096;
 function oneSpelling(path: string): string {
   let id: string;
   try { const s = statSync(path); id = `${s.dev}:${s.ino}`; } catch { return path; }
@@ -49,6 +50,10 @@ function oneSpelling(path: string): string {
     if (known === path) return path;
     // The inode may have been reused by another folder since: the known spelling counts only while it is this folder.
     try { const s = statSync(known); if (`${s.dev}:${s.ino}` === id) return known; } catch { /* gone */ }
+  }
+  if (spellingOf.size >= SPELLING_CACHE_BOUND) {
+    const oldest = spellingOf.keys().next().value;
+    if (oldest !== undefined) spellingOf.delete(oldest);
   }
   spellingOf.set(id, path);
   return path;
@@ -201,7 +206,8 @@ function computedIdentityOf(path: string, registered: readonly string[]): string
   // The walk stops below the home folder: a repository at the home itself (kept dotfiles) is nobody's project, or
   // every folder under it without a repository of its own would be one project.
   const home = real(homedir());
-  for (let at = path; at !== home && dirname(at) !== at; at = dirname(at)) {
+  const goodvibesHome = real(resolveGoodVibesHome());
+  for (let at = path; at !== home && at !== goodvibesHome && dirname(at) !== at; at = dirname(at)) {
     if (existsSync(join(at, '.git'))) { repository = at; break; }
   }
   const registeredRoot = registered.filter((root) => covers(root, path)).sort((a, b) => b.length - a.length)[0];

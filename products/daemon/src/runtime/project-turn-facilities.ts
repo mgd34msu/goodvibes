@@ -179,6 +179,7 @@ export function createProjectTurnFacilities(options: ProjectTurnFacilitiesOption
 
     const workPlans = options.workPlans;
     const planServices: ProjectPlanningService[] = [];
+    let released = false;
     // Made on a turn's first use: in the process's own context, as the rest of the project's facilities.
     const workPlan = workPlans ? lazyWorkPlan(() => outsideEveryCall(async () => {
       const projectId = await workPlans.projectIdOf(key);
@@ -188,6 +189,10 @@ export function createProjectTurnFacilities(options: ProjectTurnFacilitiesOption
         defaultProjectId: projectId, workPlanRowsPath: workPlans.planFile, projectRoot: key,
         ...(workPlans.runtimeBus ? { runtimeBus: workPlans.runtimeBus } : {}),
       });
+      if (released) {
+        service.dispose();
+        throw new Error(`Project facilities for ${key} were released while initializing its work plan.`);
+      }
       workPlans.noteProject?.(projectId, key);
       planServices.push(service);
       return new ProjectWorkPlan({ service, projectId, projectRoot: key, surface: GOODVIBES_DAEMON_SURFACE_ROOT,
@@ -289,6 +294,7 @@ export function createProjectTurnFacilities(options: ProjectTurnFacilitiesOption
         return { mcpRegistry: servers.mcpRegistry, connect: () => servers.connect(), release: () => servers.release() };
       } } : {}),
       release: async () => {
+        released = true;
         for (const service of planServices.splice(0)) service.dispose();
         if (codeIndex) {
           try { codeIndex.codeIndexReindexScheduler.dispose(); codeIndex.codeIndexStore.close(); } catch { /* closed with the daemon */ }
@@ -298,9 +304,10 @@ export function createProjectTurnFacilities(options: ProjectTurnFacilitiesOption
     };
   };
   // The folders of each project that hold its facilities now (told by `release` when one is let go), and the projects
-  // held for good (a project's Work graph, `hold`).
+  // held for good (a project's Work graph, `hold`), refcounted per project.
   const held = new Map<string, Set<string>>();
-  const pinned = new Set<string>();
+  const pinned = new Map<string, number>();
+  let closed = false;
   // Each held folder keeps the project it had when first held (workspace/project-identity.ts `holdProjectIdentity`):
   // a register change re-keys it only once nothing holds it, so a running turn's project never changes under it and
   // no second set is built over the same files.
@@ -309,6 +316,7 @@ export function createProjectTurnFacilities(options: ProjectTurnFacilitiesOption
   const facts = { homeDirectory: options.homeDirectory, goodVibesHome: join(options.homeDirectory, '.goodvibes'), daemonHome: options.daemonHome, assignedProjects: () => [] };
   /** The project's facilities for `folder`, held by `holder` (the folder itself, or a token of its own) until let go. */
   const acquire = (folder: string, holder: string): AgentProjectFacilities & { readonly release: () => Promise<void> } => {
+    if (closed) throw new Error(`The daemon is stopping, so project facilities for ${folder} were not opened.`);
     // Only a folder that can be a project: the never-a-project rules of the one check (the owner's own program's, the
     // widest: a device's or member's project was narrowed further at its door).
     const checked = checkCallerProject(folder, { ownersProgram: true }, facts);
@@ -332,18 +340,24 @@ export function createProjectTurnFacilities(options: ProjectTurnFacilitiesOption
     folders?.delete(holder);
     identityHolds.get(holder)?.();
     identityHolds.delete(holder);
-    if ((folders && folders.size > 0) || pinned.has(key)) return;
+    if ((folders && folders.size > 0) || (pinned.get(key) ?? 0) > 0) return;
     releaseProject(key);
   };
   const facilities: ProjectTurnFacilities = {
     // The Work graph's hold is a holder of its own: a turn letting the same folder go never ends it.
     hold(folder) {
       const project = acquire(folder, `${folder}\u0000work`);
-      pinned.add(keyOf(folder));
+      const key = keyOf(folder);
+      pinned.set(key, (pinned.get(key) ?? 0) + 1);
       return project;
     },
     unhold(folder) {
       const key = keyOf(folder);
+      const count = (pinned.get(key) ?? 0) - 1;
+      if (count > 0) {
+        pinned.set(key, count);
+        return;
+      }
       pinned.delete(key);
       letGo(key, `${folder}\u0000work`);
     },
@@ -363,6 +377,7 @@ export function createProjectTurnFacilities(options: ProjectTurnFacilitiesOption
       letGo(keyOf(folder), folder);
     },
     async close() {
+      closed = true;
       const open = [...projects.values()];
       projects.clear();
       held.clear();

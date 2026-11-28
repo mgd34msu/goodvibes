@@ -169,7 +169,11 @@ export function createNativeCiContinuationHost(deps: {
     // During the first storage await, only the actual issuer's exact reservation
     // may own this operation. It cannot start a repair before ready has succeeded.
     let persisted = false;
-    void ready.then(() => { persisted = true; }, () => { controller(record.id).abort(); controllers.delete(record.id); });
+    void ready.then(() => { persisted = true; }, () => {
+      controller(record.id).abort();
+      controllers.delete(record.id);
+      try { available().grants.revokeNativeContinuation(record.grant); } catch { /* best-effort grant cleanup */ }
+    });
     const assertCurrent = () => {
       signal.throwIfAborted();
       if (persisted) { reader.read(); return; }

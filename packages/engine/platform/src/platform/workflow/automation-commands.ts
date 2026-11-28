@@ -96,6 +96,7 @@ const DEFAULT_SCRUB: ResolvedCredentialEnvScrub = resolveCredentialEnvScrub();
 
 export class AutomationCommands {
   readonly #runs = new Set<Run>();
+  #closed = false;
   #scrub: () => ResolvedCredentialEnvScrub = () => DEFAULT_SCRUB;
   #guard: AutomationCommandGuard | undefined;
   #cwd: string | undefined;
@@ -178,6 +179,7 @@ export class AutomationCommands {
    * starts for the same key never exceeds `maxInFlight`.
    */
   async start(request: AutomationCommandRequest): Promise<AutomationCommandStart> {
+    if (this.#closed) return { started: false, reason: 'stopped', message: 'Automation was stopped before the command started.' };
     const { kind, key } = request;
     const running = this.running(kind, key);
     if (running >= request.maxInFlight) return { started: false, reason: 'busy', running, limit: request.maxInFlight };
@@ -189,7 +191,7 @@ export class AutomationCommands {
       const hostEnv = Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)) as Record<string, string>;
       const { env } = await scrubCredentialEnv(hostEnv, this.#scrub());
       // stop() ran while the scrub was being read: nothing may start that stop() cannot kill.
-      if (run.stopped) return { started: false, reason: 'stopped', message: 'Automation was stopped before the command started.' };
+      if (run.stopped || this.#closed) return { started: false, reason: 'stopped', message: 'Automation was stopped before the command started.' };
       const spawn = request.spawn ?? Bun.spawn;
       const runEnv: Record<string, string> = { ...env, ...request.env };
       if (request.sandboxed && request.env?.PATH === undefined) runEnv.PATH = `${SANDBOX_RUNTIME_BIN}:${runEnv.PATH ?? '/usr/bin:/bin'}`;
@@ -234,6 +236,7 @@ export class AutomationCommands {
    * confirmed ended (also logged).
    */
   async stop(kind?: AutomationCommandKind, key?: string): Promise<CloseReport> {
+    if (kind === undefined && key === undefined) this.#closed = true;
     const selected = [...this.#runs].filter(run => (kind === undefined || run.kind === kind) && (key === undefined || run.key === key));
     if (selected.length === 0) return NOTHING_RUNNING;
     for (const run of selected) run.stopped = true;

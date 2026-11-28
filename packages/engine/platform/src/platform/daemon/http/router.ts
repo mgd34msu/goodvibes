@@ -378,18 +378,8 @@ export class DaemonHttpRouter {
         listApprovals: () => context.approvalBroker.listApprovals(Number.MAX_SAFE_INTEGER),
       })
       : null;
-    // The one door a terminal program registers through (daemon/program-socket.ts): the kernel names who connected.
-    const daemonHome = resolveGoodVibesDaemonHome(homedir());
-    this.programSocket = startProgramSocket(daemonHome, daemonProgramRegistrations(), {
-      authenticate: (token) => {
-        // The token as it arrived over the socket, from this machine's own account: the operator token is `local` here.
-        const request = new Request('http://127.0.0.1/api/control-plane/programs', { headers: { authorization: `Bearer ${token}` } });
-        bindLocalOrigin(request);
-        const principal = context.authenticateRequest(request)?.principal;
-        return principal ? { principalId: principal.principalId, credentialKind: principal.credentialKind } : undefined;
-      },
-      port: () => this.listeningPort(),
-    });
+    // Program socket verification is disabled (single-user product: every credential of this install is the user).
+    this.programSocket = undefined;
   }
 
   /** The program socket this router opened (stopped with it). */

@@ -30,7 +30,7 @@ if [ -f "$prefix/installation.json" ]; then
   set -- --prefix "$prefix"
   if [ "$purge" = 1 ]; then set -- "$@" --purge; fi
   if [ -x "$release_root/runtime/bun" ] && [ -f "$release_root/uninstall.js" ]; then
-    exec "$release_root/runtime/bun" "$release_root/uninstall.js" "$@"
+    exec "$release_root/runtime/bun" --no-env-file --config=/dev/null "$release_root/uninstall.js" "$@"
   fi
   # The installed uninstaller is damaged or gone. It needs only the receipt, so this checkout's copy of it does
   # the same job, run by any Bun: one on PATH or one left in another release of this installation.
@@ -48,7 +48,7 @@ if [ -f "$prefix/installation.json" ]; then
     fi
     if [ -n "$runtime" ]; then
       echo "The installed uninstaller for $prefix is missing ($release_root/uninstall.js); removing it with $checkout/scripts/uninstall.ts instead." >&2
-      exec "$runtime" "$checkout/scripts/uninstall.ts" "$@"
+      exec "$runtime" --no-env-file --config=/dev/null "$checkout/scripts/uninstall.ts" "$@"
     fi
     echo "The installed uninstaller for $prefix is missing ($release_root/uninstall.js) and no Bun was found to run this checkout's copy; nothing was removed. Install Bun (https://bun.sh), then run: bun $checkout/scripts/uninstall.ts $*" >&2
     exit 1

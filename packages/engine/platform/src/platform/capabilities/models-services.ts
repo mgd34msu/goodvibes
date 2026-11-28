@@ -85,7 +85,7 @@ export function createModelsCapabilityServices(sources: ModelsServiceSources): M
         const network = registry.listDiscoveredServers().filter((server) => !onThisComputer(server));
         const servers = [...result.servers, ...network];
         registry.registerDiscoveredProviders(servers);
-        const homeDirectory = sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? dirname(resolveGoodVibesHome());
+        const homeDirectory = sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome();
         // Kept with the daemon's own state (`~/.goodvibes/tui/discovered-providers.json`), which the daemon and the
         // terminal app restore at start; merged by address, so the network scan's servers are left as they are.
         persistProviders({ homeDirectory, surfaceRoot: DAEMON_STATE_SURFACE_ROOT }, [...result.servers]);

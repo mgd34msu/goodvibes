@@ -1,5 +1,65 @@
 # Changelog
 
+## [3.6.0] - 2026-11-27
+
+The full write-up is in
+[docs/releases/3.6.0.md](https://github.com/mgd34msu/goodvibes/blob/v3.6.0/docs/releases/3.6.0.md).
+
+### Upgrading from 3.5.0
+
+- Run the terminal app, Agent, daemon, and web UI on 3.6.0 together; the
+  installer and updater replace every program as one suite.
+- Daemon records live under `<daemon home>/records/.goodvibes/` regardless of
+  launch directory; existing 3.5.0 records are carried forward automatically on
+  first start.
+- Rolling back to 3.5.0 keeps sessions, settings, memory, schedules, paired
+  devices, providers, and remembered permission rules intact.
+
+### Added
+
+- All 14 function groups rendered as shared Places across the terminal app,
+  Agent, and web UI, with `find` / `do` CLI discovery and execution across all
+  three programs.
+- `<ResultPane>` support in the web UI command palette runner so long
+  capability outputs display whole instead of truncating in a toast.
+- Tailscale Serve controls in Devices and network in both terminal programs;
+  one-click quick action in the web UI mode chip when decision models are
+  switched off.
+- Multi-project `workingDirectory` / `x-goodvibes-project` routing for
+  checkpoints, rewind, skills, hooks traces, triggers, CI watches, worktrees,
+  and session/task creation.
+
+### Changed
+
+- Simplified single-user authority: every credential of your install acts as
+  you immediately across projects and shared resources (bounded only by stored
+  scopes); retired `programs.sock` registration checks and dead per-device
+  project/shared-kind grant controls.
+- Kept chat slash commands focused on the 20 core commands while exposing full
+  Places and capability search through the UI and `Ctrl+K` palette.
+- Deduplicated Power and Tailscale settings panels in the web UI; updated
+  judgment model validation to allow `@` and up to 256 characters; removed
+  Unix-only leading-slash project path checks.
+- Compacted generated `operator-contract.ts` emission to eliminate multi-GB
+  TypeScript compiler heap usage, and replaced fragile prose/table/snapshot
+  checks with real contract and behavior tests.
+
+### Fixed
+
+- Daemon startup single-flighting, boot-recovery task drain on shutdown,
+  complete startup-failure rollback, and generation/epoch fencing for HTTP and
+  LAN HTTPS listeners.
+- Project eviction TOCTOU in CI watch repair, git lock wait recovery for `-C` /
+  `--git-dir` and `SIGKILL`'d holders, bounded caches/standing maps, and
+  idempotent telemetry/channel-health/checkpoint teardown.
+- Atomic writes and honest partial-failure reporting across config reset,
+  settings sync, preset loading, secret deletion, carry-forward markers,
+  channel setup/logout, support diagnostics, and installer/uninstaller scripts.
+- Array-valued `listOperatorInput` filters in terminal/web list queries,
+  Agent auth-path resolution (`DAEMON_STATE_SURFACE_ROOT`), Agent `work.brief`
+  visibility, and safety badge counts distinguishing policy issues from device
+  tokens.
+
 ## [3.5.0] - 2026-11-24
 
 The full write-up is in

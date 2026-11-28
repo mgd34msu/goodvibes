@@ -329,7 +329,7 @@ function daemonPoster(host: RunHost): (methodId: string, input: Record<string, u
       }
       // The program's call context and the registration this daemon issued it for this credential: the conversation a
       // record says it came from is believed only from the program that registered it.
-      const callHeaders = await programCallHeadersFor(connection.baseUrl, connection.token, connection.fetch ?? fetch);
+      const callHeaders = await programCallHeadersFor(connection.baseUrl, connection.token ?? undefined, connection.fetch ?? fetch);
       sending = true;
       const response = await (connection.fetch ?? fetch)(`${connection.baseUrl}/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`, {
         method: 'POST', redirect: 'error', ...(signal ? { signal } : {}),

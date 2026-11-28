@@ -28,7 +28,7 @@ import { runDaemonCapability } from '@goodvibes/engine/terminal-shell/command-ac
 import { requireReadModels, requireSubscriptionManager } from './runtime-services.ts';
 import { securityHereServices } from '@goodvibes/engine/terminal-shell/places';
 import { capabilityBinding } from './capability-binding.ts';
-import { composerOf, queueOf, turnsOf } from '@goodvibes/engine/terminal-shell/conversation-controls';
+import { composerOf, turnsOf } from '@goodvibes/engine/terminal-shell/conversation-controls';
 import { conversationContextOf } from '@goodvibes/engine/terminal-shell/context-inspection-command';
 import { checkpointsOf } from '@goodvibes/engine/terminal-shell/checkpoint-command';
 import { effortOf } from '@goodvibes/engine/terminal-shell/model-command';
@@ -236,7 +236,6 @@ function conversationControlsOf(ctx: CommandContext): Omit<ConversationControlSe
     record: conversationRecord(ctx),
     context: conversationContextOf(contextInspectionPolicy, ctx, effortOf(ctx)),
     composer: composerOf(ctx, localActions.attachImage),
-    queue: queueOf(ctx),
     checkpoints: checkpointsOf(checkpointPolicy, ctx),
   };
 }

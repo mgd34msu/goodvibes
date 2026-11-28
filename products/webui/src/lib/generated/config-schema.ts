@@ -240,7 +240,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "type": "string",
     "default": "medium",
     "description": "How much the model reasons before it answers, for models that can be told",
-    "validationHint": "a known reasoning effort level, run /effort for the current model choices"
+    "validationHint": "a known reasoning effort level; \"See how hard the model thinks\" in This conversation lists the current model's choices"
   },
   {
     "key": "provider.model",
@@ -270,7 +270,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "enum",
     "default": "off",
-    "description": "How GoodVibes picks a provider for each request: off (the default), manual (it compares but never switches), auto (it picks the best provider that can do the request), or pinned (always the one model named in the next setting). Applies at once from any settings path; /provider-opt commands write this setting.",
+    "description": "How GoodVibes picks a provider for each request: off (the default), manual (it compares but never switches), auto (it picks the best provider that can do the request), or pinned (always the one model named in the next setting). Applies at once from any settings path; the Routing tab of Models and providers writes this setting.",
     "enumValues": [
       "off",
       "manual",
@@ -372,6 +372,15 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     ]
   },
   {
+    "key": "behavior.budgetAlertUsd",
+    "label": "Warn when a conversation costs more than (USD, 0 for off)",
+    "appliesWhen": "next-answer",
+    "type": "number",
+    "default": 0,
+    "description": "The spending alert, one for every program on this machine (kept in the daemon's settings): when a conversation's cost passes this many US dollars, the program holding it warns you at the end of that answer (0 turns the alert off). Also set from Money, Spending.",
+    "validationHint": "an amount in US dollars, 0 or more; 0 turns the alert off"
+  },
+  {
     "key": "storage.secretPolicy",
     "label": "Where passwords and keys may be stored",
     "type": "enum",
@@ -382,6 +391,23 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
       "preferred_secure",
       "require_secure"
     ]
+  },
+  {
+    "key": "storage.codeIndexEnabled",
+    "label": "Keep the code index up to date",
+    "appliesWhen": "next-answer",
+    "type": "boolean",
+    "default": false,
+    "description": "One choice for every project on this machine (kept in the daemon's settings): a project's source code index is built the first time a turn there asks for code, and reindexed after edits; with the agent-passive-code-injection flag, code hits are given to coding turns. Bounded file/size scan. Off by default: \"build it\" (Code and changes, Code index) builds one on demand. Also set from Code and changes, Code index."
+  },
+  {
+    "key": "storage.automaticProjectsFolder",
+    "label": "Folder for automatic projects",
+    "appliesWhen": "now",
+    "type": "string",
+    "default": "",
+    "description": "Where the daemon makes a project for a chat that has none (a channel conversation whose channel has no project, a web chat started with none), the first time your own message there needs somewhere to work: one folder per chat inside this one, named from what the chat is about. Empty: a folder named goodvibes-projects in your home folder. Never inside the daemon's home. Also set from System, Workspaces.",
+    "validationHint": "the full path of a folder (or ~/...), or empty for ~/goodvibes-projects"
   },
   {
     "key": "storage.artifacts.maxBytes",
@@ -675,10 +701,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "planner.decomposition",
-    "label": "How a goal is split into work items",
+    "label": "How the plan of a piece of work is written",
     "type": "enum",
     "default": "agent",
-    "description": "How /workstream decomposes a goal into work items: 'agent' spawns a read-only planning agent (with automatic fallback to the heuristic path on any failure); 'heuristic' forces the deterministic single-item path and never spawns an agent",
+    "description": "How the plan of a piece of work is written before its steps run: 'agent' has a planning agent that only reads split what you asked for into steps (if it fails, the work is kept as one step); 'heuristic' always keeps the work as one step and starts no planning agent",
     "enumValues": [
       "agent",
       "heuristic"
@@ -686,26 +712,18 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "planner.maxTurns",
-    "label": "Most turns a plan may take (0 for no limit)",
+    "label": "Most turns writing a plan may take (0 for no limit)",
     "type": "number",
     "default": 0,
-    "description": "Optional planner turn limit; 0 runs until completion or cancellation.",
+    "description": "The most turns the planning agent may take to write the plan of a piece of work; 0 lets it go on until the plan is written or you stop it.",
     "validationHint": "non-negative safe integer; 0 means unlimited"
   },
   {
     "key": "planner.tokenCeiling",
-    "label": "Most tokens a plan may use (0 for no limit)",
+    "label": "Most tokens writing a plan may use (0 for no limit)",
     "type": "number",
     "default": 0,
-    "description": "Optional total planner token limit; 0 imposes no work budget.",
-    "validationHint": "non-negative safe integer; 0 means unlimited"
-  },
-  {
-    "key": "planner.wallTimeoutMs",
-    "label": "Longest a plan may run (ms, 0 for no limit)",
-    "type": "number",
-    "default": 0,
-    "description": "Optional planner wall-clock limit in milliseconds; 0 runs until completion or cancellation.",
+    "description": "The most tokens the planning agent may use to write the plan of a piece of work; 0 sets no limit.",
     "validationHint": "non-negative safe integer; 0 means unlimited"
   },
   {
@@ -1043,7 +1061,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Serve the web UI over https on your network",
     "type": "boolean",
     "default": false,
-    "description": "Off by default. On, the daemon also listens over https on controlPlane.lanHttps.port, beside its plain listener, with a certificate from a certificate authority made on this machine for its own names and private network addresses only (its key is kept in the secret store). A phone that installs that authority once (the page /lan-https on the plain address says how, for iPhone and Android) gets the microphone, push notifications and installing the app, which browsers allow only over https. Needs the web UI served to the network (goodvibes-daemon webui enable --lan --https turns both on). Off again: the https listener stops; the plain listener is unchanged either way."
+    "description": "Off by default. On, the daemon also listens over https on controlPlane.lanHttps.port, beside its plain listener, with a certificate from a certificate authority made on this machine for its own names and private network addresses only (its key is kept in the secret store). A phone that installs that authority once (from the link for phones that goodvibes-daemon pair prints and the Secure address screen shows: the page /lan-https on the https address, which checks the certificate against the fingerprint in the link and says how, for iPhone and Android; nothing of it is served over plain http) gets the microphone, push notifications and installing the app, which browsers allow only over https. Needs the web UI served to the network (goodvibes-daemon webui enable --lan --https turns both on). Off again: the https listener stops; the plain listener is unchanged either way."
   },
   {
     "key": "controlPlane.lanHttps.port",
@@ -1174,7 +1192,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Certificate the https address uses",
     "type": "enum",
     "default": "local-authority",
-    "description": "A phone that opens GoodVibes over plain http on your network gets the chat and little else: browsers keep the microphone, push notifications, installing the app, the camera and passkeys for https addresses. Pick one way to give GoodVibes an https address. The plain http address keeps working exactly as it does now, whichever you pick. The https address is switched on by controlPlane.lanHttps.enabled (\"Serve the web UI over https on your network\"); this setting says which certificate it serves. lets-encrypt: A certificate for a domain you own (Let's Encrypt): GoodVibes gets a free certificate from Let's Encrypt for a name under a domain you own (for example gv.example.com, and every name under it for the machines of your group) and renews it by itself about a month before it ends. It writes two kinds of DNS record through your DNS provider's API: a short-lived proof record (_acme-challenge.<name>, removed once Let's Encrypt has checked it) and an address record pointing the name at this computer's address on your network, corrected when that address changes. Phones then open https://<name>:<port>. Needs: The name, and an API token from your DNS provider (Cloudflare: a token with the permission Zone, DNS, Edit on the zone that holds the name), unless one is already stored. Nothing else: no account to make, no email, nothing to install on any phone. Choosing it agrees to Let's Encrypt's subscriber agreement. The phone gains: Every phone, tablet and computer trusts the address at once: microphone, push notifications, installing the app, camera and passkeys all work, with nothing installed on the phone. Sent: To Let's Encrypt: the name and the public half of keys made on this computer (the private keys never leave it). To your DNS provider: the name, the proof value (a digest, no secret) and this computer's local network address, which becomes readable by anyone who looks the name up. Nothing goes to GoodVibes. Before you choose: Let's Encrypt publishes the name of every certificate it issues in public logs (Certificate Transparency) that anyone can search, so pick a name that says nothing about you or your home. Some home routers refuse DNS answers that point at a local address (DNS rebinding protection); GoodVibes looks the name up from this computer after writing it and tells you if that happens, and what to change on the router. On a machine that leads a group: Sent: To Let's Encrypt: the name and the public half of keys made on this computer. To your DNS provider: the name, the proof value (a digest, no secret) and the local network address of this computer and of each machine in the group, which become readable by anyone who looks the names up. Because this computer leads a group, the certificate and its key are sent, sealed, to each machine in the group, so they serve the same certificate; they go nowhere else. Nothing goes to GoodVibes. own-files: A certificate you made: GoodVibes serves https with a certificate and key you already have (from your own certificate authority, a company one, or another ACME client). It checks them when you give them (the key must belong to the certificate; which names it covers; when it ends), reads the files again when they change, and tells you once, a fortnight before the certificate ends. It never renews it: that stays yours. Needs: The paths of two files on this computer: the certificate (with its chain) and its private key, unencrypted. The names it covers must be the names phones open. The phone gains: The same as any https address, on every device that trusts whoever signed your certificate. A device that does not trust the signer shows a certificate warning. Sent: Nothing leaves this computer: the files are read here and used here. On a machine that leads a group: Sent: The files are read here. Because this computer leads a group, the certificate and its key are sent, sealed, to each machine in the group that the certificate covers, so that machine serves the same certificate; they go nowhere else. local-authority (the default, as in 3.5.0): GoodVibes' own certificate (no domain needed): GoodVibes makes a certificate authority on this computer that can only vouch for this computer's own names and private network addresses, and serves https with a certificate it signs. It is made again at each start for the addresses the computer has then. Needs: On each phone, once: open the page /lan-https on this computer's plain address and install the GoodVibes certificate (the page says how on iPhone and Android, and how to remove it). The phone gains: Everything an https address gives, on each phone that installed the certificate; a phone that did not shows a certificate warning. Sent: Nothing leaves this computer. Before you choose: Installing a certificate on a phone is the one step it needs, and it has not been tried yet on a real iPhone or Android phone. On a machine that leads a group: GoodVibes makes a certificate authority on this computer and serves https with a certificate it signs. Because this computer leads a group, that certificate covers the names and private network addresses of every machine in the group as well as this computer's own, so a phone that installed the authority once trusts them all. It is made again at each start for the addresses the machines have then. Sent: Because this computer leads a group, the certificate and its key are sent, sealed, to each machine in the group, so they serve the same certificate; the certificate authority's own key never leaves this computer. The fourth way, Tailscale, is not a certificate this daemon serves: Tailscale: Tailscale serves this computer at its https name on your tailnet (https://<machine>.<tailnet>.ts.net) with a certificate Tailscale obtains, and forwards to GoodVibes. It is set up per machine and is not shared with the machines of a group. Needs: Tailscale installed and signed in on this computer and on each phone, and HTTPS turned on for your tailnet in the Tailscale admin page. The phone gains: Everything an https address gives, on every phone signed in to your tailnet, from anywhere, not only at home. Sent: Tailscale's coordination servers learn this machine's tailnet name (the certificate for it is issued by Let's Encrypt and appears in its public logs under your tailnet's name); your traffic goes between your devices, encrypted by Tailscale. (Settings, Network, Tailscale). In a machine group, the machine that set this up provides it to every machine that joined; a machine that joined shows what it received and has nothing to set.",
+    "description": "A phone that opens GoodVibes over plain http on your network gets the chat and little else: browsers keep the microphone, push notifications, installing the app, the camera and passkeys for https addresses. Pick one way to give GoodVibes an https address. The plain http address keeps working exactly as it does now, whichever you pick. The https address is switched on by controlPlane.lanHttps.enabled (\"Serve the web UI over https on your network\"); this setting says which certificate it serves. lets-encrypt: A certificate for a domain you own (Let's Encrypt): GoodVibes gets a free certificate from Let's Encrypt for a name under a domain you own (for example gv.example.com, and every name under it for the machines of your group) and renews it by itself about a month before it ends. It writes two kinds of DNS record through your DNS provider's API: a short-lived proof record (_acme-challenge.<name>, removed once Let's Encrypt has checked it) and an address record pointing the name at this computer's address on your network, corrected when that address changes. Phones then open https://<name>:<port>. Needs: The name, and an API token from your DNS provider (Cloudflare: a token with the permission Zone, DNS, Edit on the zone that holds the name), unless one is already stored. Nothing else: no account to make, no email, nothing to install on any phone. Choosing it agrees to Let's Encrypt's subscriber agreement. The phone gains: Every phone, tablet and computer trusts the address at once: microphone, push notifications, installing the app, camera and passkeys all work, with nothing installed on the phone. Sent: To Let's Encrypt: the name and the public half of keys made on this computer (the private keys never leave it). To your DNS provider: the name, the proof value (a digest, no secret) and this computer's local network address, which becomes readable by anyone who looks the name up. Nothing goes to GoodVibes. Before you choose: Let's Encrypt publishes the name of every certificate it issues in public logs (Certificate Transparency) that anyone can search, so pick a name that says nothing about you or your home. Some home routers refuse DNS answers that point at a local address (DNS rebinding protection); GoodVibes looks the name up from this computer after writing it and tells you if that happens, and what to change on the router. On a machine that leads a group: Sent: To Let's Encrypt: the name and the public half of keys made on this computer. To your DNS provider: the name, the proof value (a digest, no secret) and the local network address of this computer and of each machine in the group, which become readable by anyone who looks the names up. Because this computer leads a group, the certificate and its key are sent, sealed, to each machine in the group, so they serve the same certificate; they go nowhere else. Nothing goes to GoodVibes. own-files: A certificate you made: GoodVibes serves https with a certificate and key you already have (from your own certificate authority, a company one, or another ACME client). It checks them when you give them (the key must belong to the certificate; which names it covers; when it ends), reads the files again when they change, and tells you once, a fortnight before the certificate ends. It never renews it: that stays yours. Needs: The paths of two files on this computer: the certificate (with its chain) and its private key, unencrypted. The names it covers must be the names phones open. The phone gains: The same as any https address, on every device that trusts whoever signed your certificate. A device that does not trust the signer shows a certificate warning. Sent: Nothing leaves this computer: the files are read here and used here. On a machine that leads a group: Sent: The files are read here. Because this computer leads a group, the certificate and its key are sent, sealed, to each machine in the group that the certificate covers, so that machine serves the same certificate; they go nowhere else. local-authority (the default, as in 3.5.0): GoodVibes' own certificate (no domain needed): GoodVibes makes a certificate authority on this computer that can only vouch for this computer's own names and private network addresses, and serves https with a certificate it signs. It is made again at each start for the addresses the computer has then. Needs: On each phone, once: open the link for phones this screen shows (it opens the page /lan-https on the https address with the certificate's fingerprint; the page offers the certificate only when it matches) and install the GoodVibes certificate (the page says how on iPhone and Android, and how to remove it). Nothing of it is given over plain http. The phone gains: Everything an https address gives, on each phone that installed the certificate; a phone that did not shows a certificate warning. Sent: Nothing leaves this computer. Before you choose: Installing a certificate on a phone is the one step it needs, and it has not been tried yet on a real iPhone or Android phone. On a machine that leads a group: GoodVibes makes a certificate authority on this computer and serves https with a certificate it signs. Because this computer leads a group, that certificate covers the names and private network addresses of every machine in the group as well as this computer's own, so a phone that installed the authority once trusts them all. It is made again at each start for the addresses the machines have then, lasts 90 days and is renewed by itself a month before it ends, and a new one with a new key is made at once when a machine leaves the group or is removed. Sent: Because this computer leads a group, the certificate and its key are sent, sealed, to each machine in the group, so they serve the same certificate, with the authority's public certificate, so the page /lan-https on each of them offers phones this same authority; the certificate authority's own key never leaves this computer. The fourth way, Tailscale, is not a certificate this daemon serves: Tailscale: Tailscale serves this computer at its https name on your tailnet (https://<machine>.<tailnet>.ts.net) with a certificate Tailscale obtains, and forwards to GoodVibes. It is set up per machine and is not shared with the machines of a group. Needs: Tailscale installed and signed in on this computer and on each phone, and HTTPS turned on for your tailnet in the Tailscale admin page. The phone gains: Everything an https address gives, on every phone signed in to your tailnet, from anywhere, not only at home. Sent: Tailscale's coordination servers learn this machine's tailnet name (the certificate for it is issued by Let's Encrypt and appears in its public logs under your tailnet's name); your traffic goes between your devices, encrypted by Tailscale. (Settings, Network, Tailscale). In a machine group, the machine that set this up provides it to every machine that joined; a machine that joined shows what it received and has nothing to set.",
     "enumValues": [
       "local-authority",
       "own-files",
@@ -1341,7 +1359,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Ask before every purchase",
     "type": "boolean",
     "default": false,
-    "description": "When true, every purchase needs your approval first, given with /payments approve (or payments.checkout.approve) naming the merchant, the item and the most it may cost, before the agent may start it; the approval lasts five minutes and is used once. Default FALSE: the agent buys on your behalf inside your budgets without asking first, and that standing answer is kept here until you change it. Either way, a purchase over a budget or at a shop nobody vouches for still asks you before it is bought, and an approval you give in advance answers that question for a total up to the amount you named."
+    "description": "When true, every purchase needs your approval first, given with \"Approve one purchase ahead of time\" in the Money place (or payments.checkout.approve) naming the merchant, the item and the most it may cost, before the agent may start it; the approval lasts five minutes and is used once. Default FALSE: the agent buys on your behalf inside your budgets without asking first, and that standing answer is kept here until you change it. Either way, a purchase over a budget or at a shop nobody vouches for still asks you before it is bought, and an approval you give in advance answers that question for a total up to the amount you named."
   },
   {
     "key": "payments.defaultCardId",
@@ -1363,7 +1381,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Card security code at checkout",
     "type": "enum",
     "default": "stored",
-    "description": "How the card verification value is handled at checkout. 'stored' (DEFAULT) keeps it in the daemon secret store beside the card number, encrypted at rest, so a purchase within budget completes while you are away, which is what autonomous action requires. Choosing 'prompt' stores nothing: when a purchase is approved and reaches payment, it stops and asks you to type the code in the terminal app (/payments pending) or the local web UI, waiting as long as an approval window, and nothing is bought if the code is not typed in time. So nothing completes while you are away. Never send the code in a chat; a likely code typed on a remote channel while one is awaited is refused there. Surfaces show CVV_PROMPT_TRADEOFF_WARNING at the moment you select it. Provisioning a virtual card with a hard issuer cap bounds what any leak of stored card material could cost; a real card number does not.",
+    "description": "How the card verification value is handled at checkout. 'stored' (DEFAULT) keeps it in the daemon secret store beside the card number, encrypted at rest, so a purchase within budget completes while you are away, which is what autonomous action requires. Choosing 'prompt' stores nothing: when a purchase is approved and reaches payment, it stops and asks you to type the code in the terminal app or the Agent (Waiting for you, under Purchases) or the local web UI, waiting as long as an approval window, and nothing is bought if the code is not typed in time. So nothing completes while you are away. Never send the code in a chat; a likely code typed on a remote channel while one is awaited is refused there. Surfaces show CVV_PROMPT_TRADEOFF_WARNING at the moment you select it. Provisioning a virtual card with a hard issuer cap bounds what any leak of stored card material could cost; a real card number does not.",
     "enumValues": [
       "stored",
       "prompt"
@@ -1582,7 +1600,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Other places purchase questions are sent",
     "type": "string",
     "default": "",
-    "description": "Comma-separated, ordered list of channels that ALSO receive approval and veto prompts and may answer them. Every purchase notice, window and confirmation is always posted to your owner inbox (/questions in both terminal apps, and the web UI), where it can be answered, whatever this says; these channels reach you away from them. Today only 'telegram' has a delivery path. EMAIL IS NOT AND WILL NEVER BE ACCEPTED HERE, an inbound email is content anyone can write and cannot authorize spending. An unrecognised name is rejected rather than ignored, because a channel you believe will reach you and does not is worse than none. Empty means the owner inbox only: an in-budget purchase is announced there and waits its veto window, and an above-budget one is asked there.",
+    "description": "Comma-separated, ordered list of channels that ALSO receive approval and veto prompts and may answer them. Every purchase notice, window and confirmation is always posted to your owner inbox (Waiting for you in both terminal apps and the web UI), where it can be answered, whatever this says; these channels reach you away from them. Today only 'telegram' has a delivery path. EMAIL IS NOT AND WILL NEVER BE ACCEPTED HERE, an inbound email is content anyone can write and cannot authorize spending. An unrecognised name is rejected rather than ignored, because a channel you believe will reach you and does not is worse than none. Empty means the owner inbox only: an in-budget purchase is announced there and waits its veto window, and an above-budget one is asked there.",
     "validationHint": "a comma-separated list; only 'telegram' can deliver a notice today"
   },
   {
@@ -1754,7 +1772,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Folder memories are written to as files",
     "type": "string",
     "default": ".goodvibes/memory/projection",
-    "description": "/memory sync-files writes one markdown file per standing (project/team-scope) memory record here, and commits the folder when it sits inside a git repository. A relative path resolves against the project working directory. /memory review-files reads your edits back from this folder as proposals; editing or deleting a file never changes the memory store directly.",
+    "description": "\"Keep as files\" (in Memory and knowledge, Copies and files) writes one markdown file per standing (project/team-scope) memory record here, and commits the folder when it sits inside a git repository. A relative path resolves against the project working directory. \"What file edits change\" reads your edits back from this folder as proposals; editing or deleting a file never changes the memory store directly.",
     "validationHint": "a folder path, relative to the project or absolute"
   },
   {
@@ -1968,7 +1986,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "boolean",
     "default": false,
-    "description": "Listens all the time for the wake phrase on the chosen microphone. Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops it and releases the device immediately. WHERE IT LISTENS depends on the voice.wake.surfaces.* rows: the terminal captures through a recorder subprocess and is on by default, the agent captures the same way and is opted in per surface, and a browser tab captures through getUserMedia and is opted in per origin. Off by default because an always-on microphone must be an explicit act, not something a user discovers after the fact. THE MODEL IS ALREADY THERE: installing goodvibes downloads and checksum-verifies the pinned classifier, and a daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step at all. Turning it on in the terminal app or Agent (settings, /settings, a model's settings call) runs the same setup as /voice wake-setup: it turns the wake rows on, fetches any missing wake-word model files and shows the plan; installing a speech-to-text engine is only proposed."
+    "description": "Listens all the time for the wake phrase on the chosen microphone. Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops it and releases the device immediately. WHERE IT LISTENS depends on the voice.wake.surfaces.* rows: the terminal captures through a recorder subprocess and is on by default, the agent captures the same way and is opted in per surface, and a browser tab captures through getUserMedia and is opted in per origin. Off by default because an always-on microphone must be an explicit act, not something a user discovers after the fact. THE MODEL IS ALREADY THERE: installing goodvibes downloads and checksum-verifies the pinned classifier, and a daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step at all. Turning it on in the terminal app or Agent (settings, /settings, a model's settings call) runs the same setup as setting up the wake word in the System place, Voice: it turns the wake rows on, fetches any missing wake-word model files and shows the plan; installing a speech-to-text engine is only proposed."
   },
   {
     "key": "voice.wake.models",
@@ -3854,10 +3872,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "runtime.companionChatLimiter.perSessionLimit",
-    "label": "Most chat messages per minute",
+    "label": "Most chat messages waiting",
     "type": "number",
     "default": 0,
-    "description": "Max companion chat messages per 60-second window per session. 0 (the default) means unset: the GOODVIBES_CHAT_LIMITER_THRESHOLD env var (read once at daemon startup) applies, else 10. A positive integer overrides the env var and is read on each check() call.",
+    "description": "Most companion chat messages one chat holds waiting to be answered (queued or running); one more is refused until one is answered. 0 (the default) means unset: the GOODVIBES_CHAT_LIMITER_THRESHOLD env var (read once at daemon startup) applies, else 10. A positive integer overrides the env var and is read on each check() call.",
     "validationHint": "integer in [0, 100000]"
   },
   {
@@ -3937,7 +3955,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Where batched requests wait",
     "type": "enum",
     "default": "local",
-    "description": "Queue backend for daemon batch signals. local stores jobs under the daemon config directory; cloudflare sends them through the provisioned Worker's queue. /cloudflare provision switches this to cloudflare only after the Worker reaches the daemon.",
+    "description": "Queue backend for daemon batch signals. local stores jobs under the daemon config directory; cloudflare sends them through the provisioned Worker's queue. Deploying on Cloudflare (the Cloudflare tab of Devices and network) switches this to cloudflare only after the Worker reaches the daemon.",
     "enumValues": [
       "local",
       "cloudflare"
@@ -3980,7 +3998,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Most Cloudflare queue messages per day",
     "type": "number",
     "default": 1000,
-    "description": "Daily Cloudflare queue message budget, enforced by the provisioned Worker (its Durable Object coordinator counts per UTC day): past it, the Worker answers 429 QUEUE_BUDGET_EXHAUSTED with the use so far and when it resets, and nothing more is queued. 0 means no limit. Takes effect at the next /cloudflare provision.",
+    "description": "Daily Cloudflare queue message budget, enforced by the provisioned Worker (its Durable Object coordinator counts per UTC day): past it, the Worker answers 429 QUEUE_BUDGET_EXHAUSTED with the use so far and when it resets, and nothing more is queued. 0 means no limit. Takes effect at the next deploy on Cloudflare (the Cloudflare tab of Devices and network).",
     "validationHint": "integer in [0, 10000000]"
   },
   {
@@ -3995,7 +4013,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Stay within Cloudflare's free plan",
     "type": "boolean",
     "default": true,
-    "description": "Keep job bodies out of Cloudflare Queues: the provisioned Worker stores each body in R2 and queues only its key, and refuses a job when R2 is not provisioned (409 QUEUE_PAYLOADS_NEED_R2). Off, a body up to batch.maxQueuePayloadBytes travels in the queue message. Takes effect at the next /cloudflare provision."
+    "description": "Keep job bodies out of Cloudflare Queues: the provisioned Worker stores each body in R2 and queues only its key, and refuses a job when R2 is not provisioned (409 QUEUE_PAYLOADS_NEED_R2). Off, a body up to batch.maxQueuePayloadBytes travels in the queue message. Takes effect at the next deploy on Cloudflare (the Cloudflare tab of Devices and network)."
   },
   {
     "key": "cloudflare.accountId",
@@ -4205,7 +4223,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Most Cloudflare queue operations per day",
     "type": "number",
     "default": 10000,
-    "description": "Daily Cloudflare queue operation budget, enforced by the provisioned Worker (its Durable Object coordinator counts per UTC day): past it, the Worker answers 429 QUEUE_BUDGET_EXHAUSTED with the use so far and when it resets. 0 means no limit. Takes effect at the next /cloudflare provision.",
+    "description": "Daily Cloudflare queue operation budget, enforced by the provisioned Worker (its Durable Object coordinator counts per UTC day): past it, the Worker answers 429 QUEUE_BUDGET_EXHAUSTED with the use so far and when it resets. 0 means no limit. Takes effect at the next deploy on Cloudflare (the Cloudflare tab of Devices and network).",
     "validationHint": "integer in [0, 10000000]"
   },
   {
@@ -4273,14 +4291,6 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "validationHint": "integer in [1, 5000]"
   },
   {
-    "key": "watchers.triggers.runHistoryTtlHours",
-    "label": "Keep trigger runs for (hours)",
-    "type": "number",
-    "default": 168,
-    "description": "Age ceiling in hours on retained run history. Records older than this are reaped by the recovery sweep even when the count limit has not been reached, and the sweep reports how many it removed. Read once when the daemon starts; restart to apply a change.",
-    "validationHint": "integer in [1, 8760]"
-  },
-  {
     "key": "watchers.triggers.eventLogLimit",
     "label": "Events kept for linking triggers",
     "type": "number",
@@ -4301,7 +4311,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "How often old trigger records are cleared (ms)",
     "type": "number",
     "default": 300000,
-    "description": "Cadence of the recurring housekeeping sweep: reap records whose owning process or session is gone, retire fired one-shot triggers, enforce the count and age bounds, and re-validate persisted state by content. A daemon that only sweeps at boot never sweeps. Read once when the daemon starts; restart to apply a change.",
+    "description": "Cadence of the recurring housekeeping sweep: reap records whose owning process or session is gone, retire fired one-shot triggers, enforce the count bounds and the correlation log's window, and re-validate persisted state by content. A daemon that only sweeps at boot never sweeps. Read once when the daemon starts; restart to apply a change.",
     "validationHint": "integer in [10000, 86400000]"
   },
   {
@@ -4482,13 +4492,6 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     ]
   },
   {
-    "key": "daemon.enabled",
-    "label": "Use the background daemon",
-    "type": "boolean",
-    "default": true,
-    "description": "Whether THIS surface ADOPTS a session daemon of its own, the background service hosting the shared session broker and companion chat, bound to loopback (127.0.0.1). On (the default), the surface looks for one and adopts it. Off, it makes no adoption attempt and probes no port. It does not control the daemon process itself: a daemon started on its own runs regardless of this setting, which is a per-surface choice about adopting one. It is also NOT the switch for talking to a daemon this surface is already connected to, that is daemon.connectedHost.enabled, and the two were one key until they were split apart."
-  },
-  {
     "key": "daemon.connectedHost.enabled",
     "label": "Let this app reach its connected daemon",
     "type": "boolean",
@@ -4500,7 +4503,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Address of the daemon to connect to",
     "type": "string",
     "default": "",
-    "description": "Where the terminal app (goodvibes) and the Agent (goodvibes-agent) dial their daemon, as an origin such as http://10.0.0.7:3421. Empty (the default) means the daemon on this machine, at the address derived from controlPlane.hostMode, controlPlane.host and controlPlane.port; those settings describe only how a local daemon listens. /setup connect-daemon (\"Use a daemon on another computer\") writes this, so finishing setup or changing the local bind does not move the client off the daemon it connected to; the Agent's --runtime-url sets it for one run. Clear it to go back to the daemon on this machine.",
+    "description": "Where the terminal app (goodvibes) and the Agent (goodvibes-agent) dial their daemon, as an origin such as http://10.0.0.7:3421. Empty (the default) means the daemon on this machine, at the address derived from controlPlane.hostMode, controlPlane.host and controlPlane.port; those settings describe only how a local daemon listens. System, Setup, \"A daemon elsewhere\" writes this, so finishing setup or changing the local bind does not move the client off the daemon it connected to; the Agent's --runtime-url sets it for one run. Clear it to go back to the daemon on this machine.",
     "validationHint": "empty, or an http(s) origin with no path, user name or password, e.g. http://10.0.0.7:3421"
   },
   {
@@ -4682,14 +4685,6 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     ]
   },
   {
-    "key": "contract.gateTimeoutMs",
-    "label": "Longest a quality check may run (ms)",
-    "type": "number",
-    "default": 900000,
-    "description": "Timeout in ms for each quality gate command and for a /test run (default 15 minutes); a gate past it is stopped and reported unverified; 0 runs until completion or cancellation",
-    "validationHint": "integer in [0, 2147483647]"
-  },
-  {
     "key": "contract.acceptanceStakes",
     "label": "How strict a contract's checks are",
     "type": "enum",
@@ -4800,28 +4795,12 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     ]
   },
   {
-    "key": "contract.heartbeatTimeoutMs",
-    "label": "Restart a silent unit after (ms)",
-    "type": "number",
-    "default": 600000,
-    "description": "Silence in ms after which a running unit agent is restarted once, then failed. An exec command within its own timeout_ms, or without one, is not silence. 0 = off.",
-    "validationHint": "finite number >= 0"
-  },
-  {
     "key": "contract.transportRetryLimit",
     "label": "Retries after a connection error",
     "type": "number",
     "default": 3,
-    "description": "How many times a unit whose agent failed on a transient error (a 5xx, 408 or 429 answer, a connection error, or a failure nothing could classify while the decision model is unavailable) is restarted with a fresh agent before the contract fails. 0 disables the retry.",
+    "description": "How many times a workstream phase agent that failed on a connection error is started again at once before its item fails. 0 disables it. A step of a piece of work is never started again by this: a failed step ends failed, and whether it runs again is decided by your permission mode.",
     "validationHint": "number in [0, 5]"
-  },
-  {
-    "key": "contract.transportRetryDelayMs",
-    "label": "Wait before retrying after a connection error (ms)",
-    "type": "number",
-    "default": 5000,
-    "description": "Wait in ms before the first restart of a unit after a transient failure; it doubles for each further restart (at most 60000). A Retry-After the provider sent is used instead.",
-    "validationHint": "number in [0, 60000]"
   },
   {
     "key": "contract.nudgeTtlMs",
@@ -4847,18 +4826,15 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "judgment.policy",
-    "label": "If Jev can't answer",
+    "label": "When the decision model is missing or fails",
     "type": "enum",
     "default": "Hybrid",
-    "description": "Only for Jev decides and Just vibes: what happens to a call Jev would decide when the decision model fails. Ask me (default): it comes to you (in Just vibes it is held to the end of the run), and the failure is shown once with the model, what failed and the next step. Refuse the action: it is refused with the reason, and the turn goes on.",
+    "description": "Who answers is set in one place, When GoodVibes asks (permissions.mode); this setting only says what happens while a set decision model fails, or that none is used. Hybrid (default): while it fails, each decision takes its own fallback (a permission call comes to you instead, or is held to the end of the run in Just vibes), and the failure is shown once with the model, what failed and the next step. Decision Model Only: while it fails, a call it would have decided is refused with its error and the turn goes on. No Decision Model: no decision model is asked, as with none set, and every decision takes its fallback (a permission call comes to you, or is held in Just vibes). YOLO asks no decision model, so this setting does not change it.",
     "enumValues": [
       "Hybrid",
-      "Decision Model Only"
-    ],
-    "enumLabels": {
-      "Hybrid": "Ask me",
-      "Decision Model Only": "Refuse the action"
-    }
+      "Decision Model Only",
+      "No Decision Model"
+    ]
   },
   {
     "key": "judgment.endpoint",
@@ -4937,7 +4913,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "No decision model",
     "type": "boolean",
     "default": false,
-    "description": "On: no decision model is asked, whatever this computer's environment holds (a decision model key or server address there is not used), so nothing is sent to one; Jev decides then asks you, as Ask me does. Choosing No decision model in Settings turns it on, as does carrying forward an earlier version's No Decision Model; choosing a decision model in Settings turns it off. Off (the default): a decision model set here or found in the environment is used"
+    "description": "On: no decision model is asked, whatever this computer's environment holds (a decision model key or server address there is not used), so nothing is sent to one; every decision takes its fallback (Jev decides asks you as Ask me does, Just vibes holds the call to the end of the run). Choosing No decision model in Settings turns it on, as does carrying forward an earlier version's No Decision Model; choosing a decision model in Settings turns it off. Off (the default): a decision model set here or found in the environment is used"
   },
   {
     "key": "fetch.sanitizeMode",
@@ -5073,7 +5049,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "boolean",
     "default": true,
-    "description": "Enforce delivery service-level objectives for channel integrations: failures are classified retryable/terminal, retried with exponential backoff, and dead-letter events are logged at error level and surfaced in integration diagnostics; failed webhook notifications are listed with /notify failed and sent again with /notify resend <id|all>. When false, dead letters are warn-level only. An explicit per-queue sloEnforced option still overrides this default."
+    "description": "Enforce delivery service-level objectives for channel integrations: failures are classified retryable/terminal, retried with exponential backoff, and dead-letter events are logged at error level and surfaced in integration diagnostics; failed webhook notifications are listed under Failed notifications in Mail, calendar and channels, where each, or all, is sent again. When false, dead letters are warn-level only. An explicit per-queue sloEnforced option still overrides this default."
   },
   {
     "key": "policy.registryEnabled",
@@ -5081,7 +5057,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "boolean",
     "default": false,
-    "description": "Enable the versioned policy bundle registry with promote/rollback semantics and the /security load-policy, simulate-policy, compare-policy, enforce-policy and restore-policy actions. Enforcement requires passing divergence-gate evidence first; default off until that evidence exists."
+    "description": "Enable the versioned policy bundle registry with promote/rollback semantics, loaded, reviewed, enforced and restored in Permissions and safety, Policy. Enforcement requires passing divergence-gate evidence first; default off until that evidence exists."
   },
   {
     "key": "policy.requireSignedBundles",
@@ -5242,12 +5218,12 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Uses the context size a local model's server reports, so the conversation is shortened at the right point for that model. Turn off to use only explicitly configured or static limits."
   },
   {
-    "key": "planner.adaptive",
-    "label": "Choose how each turn is carried out (not used yet)",
+    "key": "planner.showPlanFirst",
+    "label": "Show me the plan before it runs",
     "appliesWhen": "now",
     "type": "boolean",
     "default": false,
-    "description": "Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so this setting changes nothing today. The planner that /work planner, planner-mode, planner-override and planner-explain work with is consulted when /workstream drafts a plan, whatever this setting says."
+    "description": "Off: a piece of work you ask for has its plan written and run, and you can open the plan in Work at any time. On: its plan waits in Work, where you can change, reorder or take out steps or have it written again, then approve it (that starts the work) or throw it away."
   },
   {
     "key": "tools.outputSchemaFingerprints",
@@ -5275,7 +5251,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "restart",
     "type": "boolean",
     "default": true,
-    "description": "The unified RuntimeTask interface used for task tracking across all subsystems (exec, agent, acp, scheduler, daemon, mcp, plugin, integration), including the /tasks command and operator interventions (cancel/pause/resume/retry). Restart to apply. Default on. Set false to turn the runtime task manager off."
+    "description": "The unified RuntimeTask interface used for task tracking across all subsystems (exec, agent, acp, scheduler, daemon, mcp, plugin, integration), including the tasks of the Work place and operator interventions (cancel/pause/resume/retry). Restart to apply. Default on. Set false to turn the runtime task manager off."
   },
   {
     "key": "runtime.pluginLifecycle",
@@ -5391,7 +5367,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Your own model prices",
     "type": "object",
     "default": {},
-    "description": "Manual model prices, keyed provider:model (e.g. \"openrouter:deepseek/deepseek-chat\"). Each entry: { input, output, cacheRead?, cacheWrite? } in USD per 1M tokens. A manual price always wins over provider-served and catalog pricing and applies live (no restart). Set one when registering a custom provider/model, or to pin a negotiated rate for any model.",
+    "description": "Manual model prices, keyed provider:model (e.g. \"openrouter:deepseek/deepseek-chat\"). Each entry: { input, output, cacheRead?, cacheWrite? } in USD per 1M tokens. A manual price always wins over provider-served and catalog pricing and applies live (no restart). Kept by the daemon for every program and for what it records; set one in Money, Spending (your price for the model in use, or for a model with no price), when registering a custom provider/model, or to pin a negotiated rate for any model.",
     "validationHint": "record keyed \"provider:model\" of { input, output, cacheRead?, cacheWrite? }, finite numbers >= 0, USD per 1M tokens"
   },
   {
@@ -5512,8 +5488,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Webhooks that receive notifications",
     "type": "object",
     "default": [],
-    "description": "Webhook URLs that receive the notifications this machine sends (turn ends, approvals waiting, budget alerts). Each URL carries its own key, so it is kept in the secret store and this list holds a goodvibes://secrets/ reference to each; add one with /notify add <url>. Screens show only each URL's host. Applies at the next start",
-    "validationHint": "list of goodvibes://secrets/ references to stored webhook URLs; add a URL with /notify add <url>"
+    "description": "Webhook URLs that receive the notifications this machine sends (turn ends, approvals waiting, budget alerts). Each URL carries its own key, so it is kept in the secret store and this list holds a goodvibes://secrets/ reference to each; add one with \"add an address\" on the Notifications tab of Mail, calendar and channels. One list, the daemon's, for every program on this machine. Screens show only each URL's host. Applies at the next start",
+    "validationHint": "list of goodvibes://secrets/ references to stored webhook URLs; add a URL with \"add an address\" on the Notifications tab of Mail, calendar and channels"
   },
   {
     "key": "sandbox.egressAllowlist",
@@ -5635,7 +5611,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "unified-runtime-task",
     "name": "Unified RuntimeTask",
-    "description": "The unified RuntimeTask interface used for task tracking across all subsystems, including the /tasks command and operator interventions. Turn runtime.unifiedTasks off to disable it.",
+    "description": "The unified RuntimeTask interface used for task tracking across all subsystems, including the tasks of the Work place and operator interventions. Turn runtime.unifiedTasks off to disable it.",
     "domain": "runtime",
     "enablement": {
       "key": "runtime.unifiedTasks",
@@ -5667,7 +5643,6 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "watchers.triggers.maxConcurrentChecks",
       "watchers.triggers.observationRingSize",
       "watchers.triggers.runHistoryLimit",
-      "watchers.triggers.runHistoryTtlHours",
       "watchers.triggers.eventLogLimit",
       "watchers.triggers.eventLogTtlHours",
       "watchers.triggers.sweepIntervalMs",
@@ -6037,7 +6012,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "policy-as-code",
     "name": "Policy-as-Code",
-    "description": "Enables the versioned policy bundle registry with promote/rollback semantics. Before enforcement, /security simulate-policy shows the rule diff and the calls this installation recorded that the bundle would decide differently, and /security enforce-policy confirms them. Exposes /security load-policy, simulate-policy, compare-policy, enforce-policy and restore-policy.",
+    "description": "Enables the versioned policy bundle registry with promote/rollback semantics. Before enforcement, \"See what the candidate policy changes\" shows the rule diff and the calls this installation recorded that the bundle would decide differently, and \"Enforce the candidate policy\" confirms them (Permissions and safety, Policy; the capabilities security.load-policy, simulate-policy, compare-policy, enforce-policy and restore-policy).",
     "domain": "policy",
     "enablement": {
       "key": "policy.registryEnabled",
@@ -6054,26 +6029,9 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
     "inoperableDetail": null
   },
   {
-    "id": "adaptive-execution-planner",
-    "name": "Adaptive Execution Planner",
-    "description": "Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so turning this on changes nothing today. /work planner, planner-mode, planner-override and planner-explain work without it: they configure the planner /workstream drafting consults.",
-    "domain": "planner",
-    "enablement": {
-      "key": "planner.adaptive",
-      "kind": "boolean"
-    },
-    "settings": [
-      "planner.adaptive"
-    ],
-    "restartRequired": false,
-    "defaultEnabled": false,
-    "operable": true,
-    "inoperableDetail": null
-  },
-  {
     "id": "provider-optimizer",
     "name": "Provider Optimizer",
-    "description": "Enables the capability-contract-driven provider routing optimizer. In auto mode, selects the best capable provider for each request profile using ProviderCapabilityRegistry contracts. Supports manual, auto, and pinned routing modes with deterministic, fully-explainable route decisions. Exposes /provider route, /provider explain, /provider pin-route and /provider fallback.",
+    "description": "Enables the capability-contract-driven provider routing optimizer. In auto mode, selects the best capable provider for each request profile using ProviderCapabilityRegistry contracts. Supports manual, auto, and pinned routing modes with deterministic, fully-explainable route decisions. Its controls are on the Routing list of Models and providers (how requests are routed, why they go where they go, sending every request to one model, where a failed request goes).",
     "domain": "provider",
     "enablement": {
       "key": "provider.optimizerMode",
@@ -6096,7 +6054,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "integration-delivery-slo",
     "name": "Integration Delivery SLO",
-    "description": "Enforces delivery service-level objectives for the enabled channel surfaces (Slack, Discord, webhooks): failures are classified as retryable or terminal, retried with exponential backoff, and dead-letter events are logged at error level and surfaced in integration diagnostics. Failed webhook notifications are listed with /notify failed and sent again with /notify resend <id|all>. It runs alongside the channel family it belongs to; disable to keep warn-level logging without DLQ tracking.",
+    "description": "Enforces delivery service-level objectives for the enabled channel surfaces (Slack, Discord, webhooks): failures are classified as retryable or terminal, retried with exponential backoff, and dead-letter events are logged at error level and surfaced in integration diagnostics. Failed webhook notifications are listed under Failed notifications in Mail, calendar and channels, where each, or all, is sent again. It runs alongside the channel family it belongs to; disable to keep warn-level logging without DLQ tracking.",
     "domain": "integrations",
     "enablement": {
       "key": "integrations.delivery.sloEnforced",

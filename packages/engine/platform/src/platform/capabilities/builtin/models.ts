@@ -58,6 +58,7 @@ export interface ModelsCapabilityServices {
 /** One media provider's state, as the media registry reports it. */
 export interface MediaProviderStatusLike {
   readonly id: string;
+  readonly label?: string | undefined;
   readonly state: string;
   readonly configured: boolean;
   readonly capabilities: readonly string[];
@@ -312,8 +313,14 @@ export const PROVIDER_PIN_ROUTE: CapabilityDefinition<ModelsCapabilityServices> 
     const match = (await models.providerApi.listModels()).find((model) => model.registryKey === values.model);
     if (!match) throw new CapabilityRefusal(`No model ${values.model} is known; the routing was not changed.`, 'The Models list in Models and providers shows the models you can use.', 'NOT_FOUND');
     // The settings own the target; the provider stack applies them to the live optimizer.
+    const previousPinned = models.configManager.get('provider.optimizerPinnedModel');
     models.configManager.setDynamic('provider.optimizerPinnedModel', `${match.providerId}:${match.modelId}`);
-    models.configManager.setDynamic('provider.optimizerMode', 'pinned');
+    try {
+      models.configManager.setDynamic('provider.optimizerMode', 'pinned');
+    } catch (error) {
+      try { models.configManager.setDynamic('provider.optimizerPinnedModel', previousPinned); } catch { /* best-effort rollback */ }
+      throw error;
+    }
     models.announce({ updated: [match.providerId] });
     return { text: `Every request goes to ${match.providerId}/${match.modelId}. Choosing how requests are routed lets it go.`, data: { routing: 'pinned', model: match.registryKey } };
   },

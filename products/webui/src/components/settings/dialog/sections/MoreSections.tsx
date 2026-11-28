@@ -43,6 +43,14 @@ function SectionConfig({ id, emptyText }: { id: SettingsSectionId; emptyText?: s
 }
 
 export function DevicesSection({ onOpenView }: { onOpenView: (view: ViewId) => void }) {
+  const { groups } = useConfigSettings();
+  // PowerSettings renders the live sleep-inhibitor panel and toggle for power.keepAwake;
+  // omit that key from the schema list below so it is never shown twice on the same screen.
+  const deviceGroups = useMemo(() => groupsForSection('devices', groups).map((group) => (
+    group.id === 'power'
+      ? { ...group, plainRows: group.plainRows.filter((row) => row.key !== 'power.keepAwake') }
+      : group
+  )), [groups]);
   return (
     <>
       <PairingTokensSettings />
@@ -60,7 +68,7 @@ export function DevicesSection({ onOpenView }: { onOpenView: (view: ViewId) => v
         </div>
       </SettingsBlock>
       <PowerSettings />
-      <SectionConfig id="devices" />
+      <ConfigGroupList groups={deviceGroups} />
     </>
   );
 }

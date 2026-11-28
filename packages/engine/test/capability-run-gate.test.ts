@@ -447,7 +447,8 @@ test('a model\'s call put to the owner waits for them and runs nothing on their 
   registerCapabilityTools(programTools, programPaths, config, {
     catalog: () => new CapabilityCatalog(movedCapabilityEntries()), program: 'agent', workingDirectory: () => workspace,
   });
-  registerAgentLocalRegistryTool(programTools, programPaths, new MemoryRegistry(memoryStore), createLocalMemoryAccess(memoryStore), daemonCapabilityRunner());
+  const memoryRegistry = new MemoryRegistry(memoryStore);
+  registerAgentLocalRegistryTool(programTools, programPaths, memoryRegistry, createLocalMemoryAccess(memoryRegistry), daemonCapabilityRunner());
   const turn: ToolExecutionDeps = { permissionManager: programGate, toolRegistry: programTools,
     autonomousSource: () => ({ goal: 'Tidy the owner\'s skills', criteria: [] }),
     hookDispatcher: null, runtimeBus: null, sessionId: 'wrap', emitterContext: () => ({ sessionId: 'wrap', traceId: 'wrap', source: 'orchestrator' }) };

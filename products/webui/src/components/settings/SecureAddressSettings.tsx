@@ -24,7 +24,6 @@ import { Button } from '../ui/Button';
 import { Field, Input } from '../ui/Field';
 import { StatusDot } from '../ui/StatusDot';
 import { SettingsBlock } from './dialog/parts';
-import { TailscaleSettings } from './TailscaleSettings';
 import '../../styles/components/secure-address.css';
 
 const SECURE_ADDRESS_KEY = ['secureAddress', 'get'] as const;
@@ -315,9 +314,8 @@ export function SecureAddressSettings() {
             <SettingsBlock title={words('tailscale')!.title} testId="secure-address-tailscale">
               <ChoiceWordsList words={words('tailscale')!} />
               {data.tailscale.address
-                ? <p className="settings-empty">Served now at <a href={data.tailscale.address} target="_blank" rel="noreferrer">{data.tailscale.address}</a>.</p>
-                : <p className="settings-empty">When Tailscale is installed and signed in on this computer, the button to serve over it appears here.</p>}
-              <TailscaleSettings />
+                ? <p className="settings-empty">Served now at <a href={data.tailscale.address} target="_blank" rel="noreferrer">{data.tailscale.address}</a>. Manage Tailscale serving in Network above.</p>
+                : <p className="settings-empty">When Tailscale is installed and signed in on this computer, turn on Tailscale serving in Network above.</p>}
             </SettingsBlock>
           )}
 

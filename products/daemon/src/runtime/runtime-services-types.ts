@@ -250,7 +250,7 @@ export interface RuntimeServices {
   readonly agentMessageBus: AgentMessageBus;
   readonly agentOrchestrator: AgentOrchestrator;
   readonly contextAccountingHolder: ContextAccountingHolder; // never bound to a session: workers answer through their own scoped source, and each hosted session binds its own holder (hosted-sessions/session-runtime.ts)
-  readonly contractRunner: ContractRunner;
+  readonly contractRunner: ContractRunner | null;
   readonly contractOperator: ContractOperatorService;
   /** Joins the hosted-session floors' workers into this runtime's fleet (the composed graph's own). */
   readonly attachHostedFleetAgents: import('@goodvibes/engine/platform/platform/runtime/bootstrap').RuntimeServices['attachHostedFleetAgents'];

@@ -463,7 +463,7 @@ export const DEVICES_PLACE = definePlace<Item>({
         const own = item as GroupItem;
         if (own.state === 'no-group') return { title: 'In no group', mark: 'paused' };
         if (own.state === 'unreadable') return { title: 'Group key could not be read', mark: 'attention' };
-        return { title: own.name, right: `${own.members} machine${own.members === 1 ? '' : 's'}`, mark: own.awaitingSync || (own.notTaken?.length ?? 0) > 0 ? 'attention' : 'ok' };
+        return { title: own.name, right: `${own.members} machine${own.members === 1 ? '' : 's'}`, mark: own.awaitingSync ? 'attention' : 'ok' };
       },
       detail: (item) => {
         const own = item as GroupItem;
@@ -481,12 +481,6 @@ export const DEVICES_PLACE = definePlace<Item>({
           ...(own.keyGeneration !== undefined ? [{ label: 'Group key', text: keyChangedWords(own.keyGeneration, own.keyChangedAt) }] : []),
           ...(own.awaitingSync ? [{ label: 'Needs a look', text: 'this machine does not hold the group\'s settings yet', tone: 'warning' as const }] : []),
           ...(own.sharing ? [] : [{ label: 'Sharing', text: 'off on this computer, so it is not on the group\'s network: nothing reaches the other machines from it until sharing is on', tone: 'warning' as const }]),
-          // What does not cross from another machine, and why (an older release there, or a change made outside its controls).
-          // A member on an older release, said as that (not as out of step).
-          ...(own.olderRelease ?? []).map((line) => ({ label: 'Older release', text: line })),
-          ...(own.notTaken ?? []).map((line) => ({ label: 'Not taken', text: line, tone: 'warning' as const })),
-          // Each shared setting changed on another machine with who made it there and how it was decided.
-          ...(own.fromGroup ?? []).map((line, index) => ({ ...(index === 0 ? { label: 'Changed elsewhere' } : {}), text: line })),
         ];
       },
     },
@@ -657,10 +651,6 @@ export const DEVICES_PLACE = definePlace<Item>({
     { key: 'p', capability: 'devices.pair', label: 'pair something' },
     { key: 'n', list: 'devices', states: ['paired', 'agent'], capability: 'devices.rename', label: 'rename', fill: { device: 'id' } },
     { key: 'x', list: 'devices', states: ['paired', 'agent'], capability: 'devices.revoke', label: 'revoke', fill: { device: 'id' } },
-    // The projects of yours it may work in (builtin/devices-projects.ts): with none it acts on shared things only.
-    { key: 'w', id: 'give-project', list: 'devices', states: ['paired', 'agent'], capability: 'devices.give-project', label: 'let it work in a project', fill: { who: (item) => `pairing:${item.id}` }, form: true },
-    { key: 'W', id: 'take-project', list: 'devices', states: ['paired', 'agent'], capability: 'devices.take-project', label: 'stop it working in a project', fill: { who: (item) => `pairing:${item.id}` }, form: true },
-    { key: 'j', id: 'device-projects', list: 'devices', whole: true, capability: 'devices.projects', label: 'projects each device may work in' },
     { key: 'x', id: 'retire-shared', list: 'devices', states: ['shared-active'], capability: 'devices.revoke-shared', label: 'retire it' },
     // Its one-time token is the outcome's reveal: shown whole in the place's own pane, with the copy key, until left.
     { key: 'g', id: 'migrate-shared', list: 'devices', states: ['shared-active'], capability: 'devices.migrate-shared', label: 'give a device its own token' },

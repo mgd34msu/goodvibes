@@ -13,6 +13,7 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
 import { currentRecordReach } from '@goodvibes/engine/daemon-api';
+import { isTheUser } from '../../daemon/method-owner-decision.js';
 import { CiWatchError, type CiWatchService } from '../../ci-watch/index.js';
 import { CiSourceError, CiTargetGoneError } from '../../ci-watch/types.js';
 
@@ -102,7 +103,7 @@ function createListHandler(service: CiWatchGatewayService): GatewayMethodHandler
     const reach = currentRecordReach();
     const reached = reach ? watches.filter((watch) => reach('ci-watch', watch.id, { project: typeof watch.project === 'string' && watch.project.trim() ? watch.project : null })) : watches;
     // Whose input made a watch is the daemon's own record (its repair's party), not part of the list.
-    return { watches: reached.map(({ party: _party, ...shown }) => shown) };
+    return { watches: reached.map(({ party: _party, madeByUser: _madeByUser, ...shown }) => shown) };
   };
 }
 
@@ -117,12 +118,11 @@ function createCreateHandler(service: CiWatchGatewayService): GatewayMethodHandl
       const watch = await service.createWatch({
         ...target,
         ...(project !== undefined ? { project } : {}),
-        // A watch made through this method is the caller's own request; the service keeps that only when no turn's source is behind the call.
-        madeByUser: true,
+        madeByUser: isTheUser(invocation.context?.actor),
         deliveryChannel: requireString(params, 'deliveryChannel'),
         triggerFixSession: params.triggerFixSession === true,
       });
-      const { party: _party, ...shown } = watch;
+      const { party: _party, madeByUser: _madeByUser, ...shown } = watch;
       return { watch: shown };
     } catch (error) {
       rethrow(error);

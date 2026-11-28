@@ -111,7 +111,7 @@ export interface SettingsTopicView<Entry, Category extends string> {
  * section follow the section's own namespace order, then the program's order.
  */
 export function buildSettingsTopics<Category extends string, Entry extends { readonly setting: { readonly key: string } }>(
-  groups: ReadonlyMap<Category, readonly Entry[]>,
+  groups: ReadonlyMap<string, readonly Entry[]>,
   lists: readonly SettingsTopicList<Category>[],
 ): SettingsTopicView<Entry, Category>[] {
   const bySection = new Map<string, { readonly rank: number; readonly row: SettingsTopicRow<Entry, Category> }[]>();

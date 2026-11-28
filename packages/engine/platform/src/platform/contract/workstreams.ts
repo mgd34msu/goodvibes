@@ -249,7 +249,7 @@ export async function takeSharedTreeForGroup(run: ContractRun, groupId: string):
     signal: run.abort.signal,
     onWait: (holder) => noteSharedTreeWait(run, groupId, holder),
   });
-  if (run.terminal) { release(); return; }
+  if (run.terminal || run.abort.signal.aborted) { release(); return; }
   run.sharedTreeReleases.get(groupId)?.();
   run.sharedTreeReleases.set(groupId, release);
   clearSharedTreeWait(run);

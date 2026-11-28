@@ -378,9 +378,17 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       const webuiLeftOff = webuiState !== undefined && webuiState.bundleDir !== '' && !webuiState.serve;
       const webuiFirst = webuiState === undefined ? !old : webuiState.bundleDir === '';
       if (old && realDaemon) {
-        // `webui enable` turns serving on; record those two beside the explicit writes (or the directory alone when left off).
-        const recorded: [string, unknown][] = webuiLeftOff ? [...writes, ['controlPlane.webui.bundleDir', webuiBundle]]
-          : [...writes, ['controlPlane.webui.serve', true], ['web.enabled', true]];
+        // `webui enable` writes bundleDir, serve, web.enabled, and (on first setup) loopback hostMode;
+        // record all of them so an interrupted upgrade rolls back cleanly.
+        const recorded: [string, unknown][] = webuiLeftOff
+          ? [...writes, ['controlPlane.webui.bundleDir', webuiBundle]]
+          : [
+              ...writes,
+              ['controlPlane.webui.bundleDir', webuiBundle],
+              ['controlPlane.webui.serve', true],
+              ['web.enabled', true],
+              ...(webuiFirst ? [['controlPlane.hostMode', 'local'], ['web.hostMode', 'local']] as [string, unknown][] : []),
+            ];
         pendingSettings = recorded.map(([key, written]) => ({ key, previous: readDaemonSetting(execute, daemon, options.dataDir, key), written }));
         atomicWrite(receiptPath(options), JSON.stringify({ ...old, pendingSettings }, null, 2) + '\n');
       }
@@ -397,7 +405,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       if (!hooks.stage) {
         console.log('Verifying the Jev connection...');
         try {
-          execute('sh', ['-c', 'set -a; . "$1"; set +a; exec "$2" "$3" "$4"', 'jev-setup', environment,
+          execute('sh', ['-c', 'set -a; . "$1"; set +a; exec "$2" --no-env-file --config=/dev/null "$3" "$4"', 'jev-setup', environment,
             join(release, 'runtime/bun'), join(ROOT, 'scripts/check-judgment.ts'), options.dataDir], { cwd: options.dataDir });
         } catch {
           // Account setup and upstream availability do not determine whether
@@ -437,7 +445,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         // daemon as a project and read that the daemon is ready for work; a failure here rolls the install back, as released.
         if (hooks.registerWorkspace || !hooks.stage) {
           const registerArguments = [join(ROOT, 'products/tui/scripts/register-installed-workspace.ts'), options.prefix, options.dataDir, String(options.port), options.workspace ?? ROOT, serviceUnit(options)];
-          (hooks.registerWorkspace ?? execute)(join(release, 'runtime/bun'), registerArguments, { cwd: options.dataDir });
+          (hooks.registerWorkspace ?? execute)(join(release, 'runtime/bun'), hooks.registerWorkspace ? registerArguments : ['--no-env-file', '--config=/dev/null', ...registerArguments], { cwd: options.dataDir });
         }
       } else if (old?.service && present(unitPath(old))) {
         // Absent when the owner already removed it (goodvibes-daemon uninstall-service).

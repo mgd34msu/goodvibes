@@ -8214,6 +8214,28 @@
       ],
       "additionalProperties": false
     },
+    "budgetSetByOwner": {
+      "type": "boolean"
+    },
+    "heldChange": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "number"
+        },
+        "step": {
+          "type": "string"
+        },
+        "said": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "at",
+        "said"
+      ],
+      "additionalProperties": false
+    },
     "failureKind": {
       "type": "string",
       "enum": [

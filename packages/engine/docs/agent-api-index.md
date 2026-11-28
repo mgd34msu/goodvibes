@@ -1,6 +1,6 @@
 # Agent API index
 
-Generated from the operator contract (product 3.5.0) by `bun run agent-spec:generate`. Spec: [agent-api.openapi.json](./agent-api.openapi.json). Everything not listed here is in the full document, `contracts/artifacts/operator-openapi.json`.
+Generated from the operator contract (product 3.6.0) by `bun run agent-spec:generate`. Spec: [agent-api.openapi.json](./agent-api.openapi.json). Everything not listed here is in the full document, `contracts/artifacts/operator-openapi.json`.
 
 Auth: `Authorization: Bearer <token>` or the login session cookie. Errors are `{ error, state?, next?, hint?, code?, category?, requestId?, retryAfterMs? }`; a 403 for a missing scope also lists `requiredScopes`, `grantedScopes` and `missingScopes`.
 
@@ -169,7 +169,7 @@ Declared by each method beside its route; every operation also lists its own und
 | `INVALID_ARGUMENT` | 400 | A field is missing or not in its documented shape (the body names it in `field`); nothing was changed. |
 | `MISSING_SCOPE` | 403 | The principal lacks a scope the method requires; the body lists requiredScopes, grantedScopes and missingScopes. |
 | `APPROVAL_NOT_FOUND` | 404 | No approval has that id; nothing was answered. |
-| `OWNER_ONLY` | 403 | Only the owner answers this approval: the Agent's credential never does, and a token minted for automation does not answer a change put to the owner. Nothing was answered. |
+| `OWNER_ONLY` | 403 | Only you answer this approval, from any of your credentials: the Agent's credential never does (a model is acting with it), and a device whose stored scope list does not hold the right to answer does not. Nothing was answered. |
 | `CONTRACT_NOT_FOUND` | 404 | No runner on this daemon holds that contract id. |
 | `CONTRACT_ENDED` | 409 | The contract has ended; start a new one for the remaining work. |
 | `CONTRACT_NATIVE` | 409 | Native work runs its units through its own execution. |

@@ -535,14 +535,16 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
     }
   }
 
-  // The skill service reads the same skill roots, in the same order, that a session on
-  // this surface loads skills from; new skills are written to the shared ~/.goodvibes/skills.
-  // Without a working directory there are no project roots, only the home ones.
-  const skillService = new SkillService(new FileSystemSkillStore({
-    roots: resolveSkillRoots({ workingDirectory: deps.workingDirectory, homeDirectory: dirname(deps.shellPaths.resolveUserPath()) }, deps.surfaceRoot),
-    createIn: deps.shellPaths.resolveUserPath('skills'),
+  // The skill service reads the caller's project skill roots (plus shared ~/.goodvibes/skills).
+  // When no project is named on a multi-project daemon, fall back to deps.workingDirectory (for single-project embeds) or home-only.
+  const skillHomeDir = dirname(deps.shellPaths.resolveUserPath());
+  const skillCreateIn = deps.shellPaths.resolveUserPath('skills');
+  const buildSkillService = (workingDirectory: string | undefined): SkillService => new SkillService(new FileSystemSkillStore({
+    roots: resolveSkillRoots({ ...(workingDirectory ? { workingDirectory } : {}), homeDirectory: skillHomeDir }, deps.surfaceRoot),
+    createIn: skillCreateIn,
   }));
-  registerSkillsGatewayMethods(catalog, skillService);
+  const defaultSkillService = buildSkillService(deps.workingDirectory);
+  registerSkillsGatewayMethods(catalog, (project) => (project ? buildSkillService(project) : defaultSkillService));
 
   // The shared registered-workspace registry: which project roots the operator
   // has opted into (coverage flows down each root's subtree, inherited through
@@ -587,7 +589,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
       nativeMutationHost: deps.nativeMutationHost?.() ?? deps.ciAutonomousHost?.(),
       configManager: deps.configManager,
       postalProviders: deps.providerRegistry,
-      occasions: { ...deps, calendarGateway: calendarGateway ?? undefined },
+      occasions: { ...deps, nativeMutationHost: deps.nativeMutationHost?.(), calendarGateway: calendarGateway ?? undefined },
       ...(deps.personalCapture === undefined ? {} : { personalCapture: deps.personalCapture }),
       // The runtime's own home, so an injected home resolves the profile under
       // it instead of falling through to whoever is logged in.
@@ -959,6 +961,10 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
 
   const rewindService = new UnifiedRewindService({
     workspace: deps.workspaceCheckpointManager,
+    workspaceFor: (sessionId, project) =>
+      deps.workspaceCheckpointManager?.forSession?.(sessionId)
+      ?? (project ? deps.workspaceCheckpointManager?.forProject?.(project) : undefined)
+      ?? deps.workspaceCheckpointManager,
     conversation: conversationHosts,
     ...(deps.rewindAnchorSurface ? { anchorSurface: deps.rewindAnchorSurface } : {}),
     ...(deps.runtimeBus

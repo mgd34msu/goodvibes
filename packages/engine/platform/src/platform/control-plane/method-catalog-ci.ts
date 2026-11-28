@@ -60,6 +60,7 @@ export const CI_WATCH_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   // Present only on a watch created under a native owner; the service stores and lists it.
   continuationId: STRING_SCHEMA,
+  project: STRING_SCHEMA,
   repo: STRING_SCHEMA,
   ref: STRING_SCHEMA,
   prNumber: NUMBER_SCHEMA,
@@ -87,6 +88,7 @@ export const CI_WATCHES_CREATE_INPUT_SCHEMA = objectSchema({
   repo: STRING_SCHEMA,
   ref: STRING_SCHEMA,
   prNumber: NUMBER_SCHEMA,
+  workingDirectory: STRING_SCHEMA,
   deliveryChannel: STRING_SCHEMA,
   triggerFixSession: BOOLEAN_SCHEMA,
 }, ['repo', 'deliveryChannel']);
@@ -148,6 +150,7 @@ export const builtinGatewayCiMethodDescriptors: readonly GatewayMethodDescriptor
     description: 'Create a standing watch on a repo/ref or PR. On a terminal verdict it notifies the channel. Failed jobs request a fresh recorded repair decision from the original source owner; the compatibility flag is not authorization.',
     category: 'ci',
     effects: ['ci.write'],
+    workFolders: ['workingDirectory'],
     http: { method: 'POST', path: '/api/ci/watches' },
     inputSchema: CI_WATCHES_CREATE_INPUT_SCHEMA,
     outputSchema: CI_WATCHES_CREATE_OUTPUT_SCHEMA,

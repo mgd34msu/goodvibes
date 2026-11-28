@@ -563,19 +563,21 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
    */
   async function closeDraining(ids: readonly string[]): Promise<CloseReport> {
     if (ids.length === 0) return EMPTY_CLOSE_REPORT;
-    const pending = ids.map((id) => ({ id, done: false, settled: settlements.get(id)?.promise ?? Promise.resolve() }));
-    for (const entry of pending) void entry.settled.then(() => { entry.done = true; });
+    const pending = ids.map((id) => ({ id, key: drainingKey(deps.store.projectRoot, id), done: false, settled: settlements.get(id)?.promise ?? Promise.resolve() }));
+    for (const entry of pending) {
+      const done = entry.settled.then(() => { entry.done = true; }).finally(() => {
+        if (drainingClaims.get(entry.key) === done) drainingClaims.delete(entry.key);
+      });
+      drainingClaims.set(entry.key, done);
+    }
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<void>((resolve) => { timer = setTimeout(resolve, DISPOSE_DRAIN_LIMIT_MS); (timer as { unref?: () => void }).unref?.(); });
-    const finished = Promise.race([Promise.all(pending.map((entry) => entry.settled)), deadline]).then(() => undefined);
-    const keys = pending.map((entry) => drainingKey(deps.store.projectRoot, entry.id));
-    for (const key of keys) drainingClaims.set(key, finished);
-    await finished;
+    await Promise.race([Promise.all(pending.map((entry) => entry.settled)), deadline]);
     clearTimeout(timer);
     const stillRunning = pending.filter((entry) => !entry.done).map((entry) => entry.id);
-    for (const id of stillRunning) releaseProcessLease(id);
-    for (const key of keys) if (drainingClaims.get(key) === finished) drainingClaims.delete(key);
-    if (stillRunning.length > 0) logger.warn('contract runner: contracts still running at shutdown; their claims were released so a rebuilt runner can resume them', { stillRunning });
+    // Keep leases and drainingClaims held for contracts whose settleWork is still draining so a rebuilt runner
+    // cannot acquire the same contract and race checkpoint writes; settleWork releases them on completion.
+    if (stillRunning.length > 0) logger.warn('contract runner: contracts still draining at shutdown; claims remain held until settlement completes', { stillRunning });
     return Object.freeze({
       stopped: Object.freeze(pending.filter((entry) => entry.done).map((entry) => `contract ${entry.id}`)),
       killed: Object.freeze([]),
@@ -1960,7 +1962,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         catch (error) { if (error instanceof OwnerReplyRefusedError) return refused(error.message); throw error; }
         return { outcome: 'restarted', reason: `${step} failed and runs again with a fresh agent; the steps waiting on it run once it is done` };
       }
-      if (isTerminalUnitStatus(unit.status)) return refused(`${step} ${unit.status === 'passed' ? 'is done' : unit.status === 'failed' ? 'failed' : 'was stopped'} and the work ended with it; ask for the work again for what is left`);
+      if (isTerminalUnitStatus(unit.status)) return refused(`${step} ${unit.status === 'failed' ? 'failed' : 'was stopped'} and the work ended with it; ask for the work again for what is left`);
       if (unit.status === 'pending' || unit.status === 'blocked') return refused(`${step} has not started yet; it starts once what it waits on is done`);
       if (unit.status === 'fixing') return refused(`a fix is being planned for ${step}; run it again once the fix is in place`);
       groups.requeueUnit(run, unit, 'run again at the owner\'s request', 'fresh-unit');

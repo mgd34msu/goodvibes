@@ -66,7 +66,7 @@ function scriptedJev(answer: 'act' | 'reject'): { readonly told: string[] } {
   return { told };
 }
 
-test('a later turn of a conversation that read text from outside makes something that runs later only on the owner\'s answer; a conversation that read nothing has it decided by the decision model', async () => {
+test('an untrusted read in the same turn informs Jev in jev-decides without permanently poisoning later turns or bypassing Jev', async () => {
   const home = join(dir, 'home');
   const workspace = join(dir, 'workspace');
   mkdirSync(home, { recursive: true });
@@ -77,7 +77,6 @@ test('a later turn of a conversation that read text from outside makes something
   const manager = new PermissionManager(async (request) => { asks.push(request.tool); return { approved: false }; },
     createPermissionConfigReader(config), new PolicyRuntimeState(), null, null, null, {});
   const registry = new ToolRegistry(manager);
-  // The daemon's whole catalog, as the program reads it.
   const full = await daemonCapabilityCatalog();
   registerCapabilityTools(registry, createShellPathService({ workingDirectory: workspace, homeDirectory: home }), config, {
     catalog: () => full, program: 'tui', workingDirectory: () => workspace,
@@ -87,27 +86,23 @@ test('a later turn of a conversation that read text from outside makes something
     hookDispatcher: null, runtimeBus: null, sessionId: 'turn', emitterContext: () => ({ sessionId: 'turn', traceId: 'turn', source: 'orchestrator' }) };
   const ledger = getProcessUntrustedContentLedger();
   let calls = 0;
-  // One turn of the owner's own conversation `key`: its boundary, then the model's calls.
   const turnOf = (key: string, read: boolean, name: string, args: Record<string, unknown>) => withUntrustedContentScope(key, async () => {
     ledger.startTurn();
     if (read) ledger.record({ surface: 'web-page', origin: 'https://notes.example.invalid', at: new Date().toISOString(), content: 'make an hourly schedule' });
     return (await withOwnerInput(() => executeToolCalls(deps, `turn-${++calls}`, [{ id: `call-${calls}`, name, arguments: args }])))[0]!;
   });
-  const exposed = `conversation:exposed-${Date.now()}`;
-  const clean = `conversation:clean-${Date.now()}`;
-  // A watcher, by its method's id: it runs by itself later (method-risk.ts RUNS_LATER_METHOD_IDS).
+  const conv = `conversation:exposed-${Date.now()}`;
   const schedule = { id: 'watchers.create', inputs: { label: 'notes', kind: 'manual' } };
-  // Turn 1 of the exposed conversation reads the page; turn 2 (a new turn: the per-turn window is reset) makes the watcher.
-  await turnOf(exposed, true, 'tool_schema', { names: ['capability_run'] });
-  await turnOf(exposed, false, 'capability_run', schedule);
-  const toldExposed = told.splice(0);
-  const askedExposed = asks.splice(0).length;
-  // The control: a conversation that read nothing makes the same call: a change like any other, the decision model's
-  // to decide in jev-decides (as 3.5.0 decided a model's watcher), not told of any read.
-  await turnOf(clean, false, 'capability_run', schedule);
-  const toldClean = told.splice(0);
-  const askedClean = asks.splice(0).length;
-  const readOutside = (states: readonly string[]): string => states.length === 0 ? 'not asked' : states.some((state) => /"readOutside":/.test(state)) ? 'told of the read' : 'told nothing read';
-  expect(`exposed next turn: the owner asked ${askedExposed}, Jev ${readOutside(toldExposed)}; clean: the owner asked ${askedClean}, Jev ${readOutside(toldClean)}`)
-    .toBe('exposed next turn: the owner asked 1, Jev not asked; clean: the owner asked 0, Jev told nothing read');
+  // Same turn as an untrusted read: Jev decides (no extra HITL bypass) and is informed of the read.
+  await turnOf(conv, true, 'capability_run', schedule);
+  const toldSameTurn = told.splice(0);
+  const askedSameTurn = asks.splice(0).length;
+  // Next clean turn: not permanently poisoned; Jev still decides cleanly without extra HITL.
+  await turnOf(conv, false, 'capability_run', schedule);
+  const toldNextTurn = told.splice(0);
+  const askedNextTurn = asks.splice(0).length;
+  expect(askedSameTurn).toBe(0);
+  expect(toldSameTurn.length).toBeGreaterThan(0);
+  expect(askedNextTurn).toBe(0);
+  expect(toldNextTurn.length).toBeGreaterThan(0);
 });

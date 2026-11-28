@@ -3982,7 +3982,8 @@ main() {
   say ""
   _install_problems=0
   if [ "$SERVICE_NOT_SET_UP" = "1" ] || [ "$SERVICE_NOT_RUNNING" = "1" ] || [ "$DAEMON_RESTART_FAILED" = "1" ] \
-    || [ "$WEBUI_NOT_CONFIGURED" = "1" ] || [ "$SERVICE_CHOICE_UNSAVED" = "1" ]; then
+    || [ "$WEBUI_NOT_CONFIGURED" = "1" ] || [ "$SERVICE_CHOICE_UNSAVED" = "1" ] \
+    || [ "$AUTO_UPDATE_UNSAVED" = "1" ] || [ "$DECISION_POLICY_UNSAVED" = "1" ]; then
     _install_problems=1
   fi
   _install_word=Done.

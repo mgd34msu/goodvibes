@@ -51,7 +51,7 @@ function channelOfSession(deps: OwnerChannelConversationDeps, sessionId: string 
   const session = sessionId ? deps.sessions.getSession(sessionId) : undefined;
   if (!session) return undefined;
   const channels = new Set(session.routeIds.map((id) => deps.routeBindings.getBinding(id)?.surfaceKind)
-    .filter((kind): kind is string => kind !== undefined && isChannelSurfaceKind(kind)));
+    .filter((kind): kind is NonNullable<typeof kind> => kind !== undefined && isChannelSurfaceKind(kind)));
   return channels.size === 1 ? [...channels][0] : undefined;
 }
 

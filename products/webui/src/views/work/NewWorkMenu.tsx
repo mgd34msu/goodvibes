@@ -26,9 +26,9 @@ import { Field, Input, Textarea } from '../../components/ui/Field';
 import { Menu, MenuItem } from '../../components/ui/Menu';
 import { Select } from '../../components/ui/Select';
 import { CiReportDetail, type CiReport } from './CiWatchDetail';
-import { ActionSheet, findCommandAction } from '../../components/command/ActionSheet';
+import { CapabilityRunner } from '../places/CapabilityRunner';
 import { projectChoiceLabel, usePlaceProjects } from '../../lib/place-project';
-import { runPlaceCapability } from '../../lib/place-capabilities';
+import { resolvePlaceCapability, runPlaceCapability, useCapabilityIndex } from '../../lib/place-capabilities';
 
 type NewKind = 'native' | 'task' | 'hosted' | 'ci-watch' | 'ci-status';
 
@@ -343,9 +343,9 @@ const TITLES: Record<NewKind, { title: string; description: string }> = {
 export function NewWorkMenu({ onCreated, onSchedules }: NewWorkMenuProps) {
   const [open, setOpen] = useState<NewKind | null>(null);
   const [scheduling, setScheduling] = useState(false);
-  // The words are /schedule's own (its description), so the menu says what the terminal says.
-  const addSchedule = findCommandAction('schedule', 'add')?.action.label;
-  const seeSchedules = findCommandAction('schedule', 'see-schedules')?.action.label;
+  const capabilities = useCapabilityIndex();
+  const addSchedule = (capabilities ? resolvePlaceCapability(capabilities, 'schedule.add')?.action.label : undefined) ?? 'Add a schedule';
+  const seeSchedules = 'See schedules';
   const close = () => setOpen(null);
   const done = (key?: string) => {
     setOpen(null);
@@ -368,10 +368,10 @@ export function NewWorkMenu({ onCreated, onSchedules }: NewWorkMenuProps) {
         <MenuItem icon={<Server />} onSelect={() => setOpen('hosted')}>Start a session in a folder</MenuItem>
         <MenuItem icon={<GitBranch />} onSelect={() => setOpen('ci-watch')}>CI watch</MenuItem>
         <MenuItem icon={<Search />} onSelect={() => setOpen('ci-status')}>Check CI status</MenuItem>
-        {addSchedule ? <MenuItem icon={<CalendarClock />} onSelect={() => setScheduling(true)}>{addSchedule}…</MenuItem> : null}
-        {onSchedules && seeSchedules ? <MenuItem icon={<CalendarClock />} onSelect={onSchedules}>{seeSchedules}</MenuItem> : null}
+        <MenuItem icon={<CalendarClock />} onSelect={() => setScheduling(true)}>{addSchedule}…</MenuItem>
+        {onSchedules ? <MenuItem icon={<CalendarClock />} onSelect={onSchedules}>{seeSchedules}</MenuItem> : null}
       </Menu>
-      {scheduling ? <ActionSheet open command="schedule" action="add" onClose={() => setScheduling(false)} /> : null}
+      {scheduling ? <CapabilityRunner id="schedule.add" onClose={() => setScheduling(false)} /> : null}
       <Dialog
         open={open !== null}
         onClose={close}

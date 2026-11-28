@@ -44,7 +44,7 @@ import { takeAppliedThemeMessage } from '../renderer/theme-mode-config.ts';
 import { hasActiveExecutionMode, readExecutionMode } from '../permissions/execution-mode.ts';
 import { routeSettingWrites } from '@goodvibes/engine/terminal-shell/settings-writes';
 import { runDaemonCapability } from '@goodvibes/engine/terminal-shell/command-actions';
-import { isSecretConfigKey } from '@goodvibes/engine/platform/platform/config';
+import { isSecretConfigKey, type ConfigKey } from '@goodvibes/engine/platform/platform/config';
 import { capabilityBinding } from '../input/commands/capability-binding.ts';
 
 type WireShellUiOpenersOptions = {
@@ -372,7 +372,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): WiredShe
       // This machine's service follows a change of the service settings: the daemon keeps the setting, and the Agent
       // does the service manager's part after the daemon took it. Keep-awake needs nothing here: the platform's power
       // manager follows the setting itself (services.ts).
-      return syncServiceSettingToPlatform({ configManager, workingDirectory, homeDirectory }, change);
+      return syncServiceSettingToPlatform({ configManager, workingDirectory, homeDirectory }, { ...change, key: change.key as ConfigKey });
     },
   };
 

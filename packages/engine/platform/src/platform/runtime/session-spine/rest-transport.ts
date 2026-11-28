@@ -328,7 +328,7 @@ async function readStatusBody(
     // With the program's registration: an owner alert kept as a receipt goes to the owner's own programs only, and the
     // operator token alone is a script (daemon-api control-routes.ts `ownerReader`).
     const response = await fetch(url, {
-      headers: { ...(await programCallHeadersFor(connection.baseUrl, connection.token)), ...(connection.token ? { authorization: `Bearer ${connection.token}` } : {}) },
+      headers: { ...(await programCallHeadersFor(connection.baseUrl, connection.token ?? undefined)), ...(connection.token ? { authorization: `Bearer ${connection.token}` } : {}) },
       signal: controller.signal,
     });
     if (!response.ok) return null;

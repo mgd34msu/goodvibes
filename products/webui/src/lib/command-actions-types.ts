@@ -22,7 +22,7 @@ export type InputData = Omit<InputDescription, 'choices'> & {
 };
 
 export type ListOperatorData =
-  | { readonly method: string; readonly input: Readonly<Record<string, string>>; readonly rows: ListRowsFromOutput }
+  | { readonly method: string; readonly input: Readonly<Record<string, string | readonly string[]>>; readonly rows: ListRowsFromOutput }
   | { readonly terminalOnly: string };
 
 export interface ActionData extends Omit<ActionShape, 'inputs'> {

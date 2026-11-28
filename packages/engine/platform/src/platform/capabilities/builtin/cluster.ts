@@ -11,7 +11,6 @@
 import { AFTER_REPLY, type ClusterGroupVerbs } from '../../daemon/http/cluster-group-routes.js';
 import type { GroupOperationResult } from '../../cluster/group-operations.js';
 import { describeReplicaAct } from '../../cluster/config-replication.js';
-import { refusedFromGroup } from '../../cluster/refused-from-group.js';
 import { generateQrMatrix, renderQrToString } from '../../pairing/qr-generator.js';
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type CapabilityResult, type InputDescription, type ListName } from '../types.js';
 
@@ -129,31 +128,14 @@ export const CLUSTER_STATUS: Definition = {
     if (report.membership === 'unreadable-key-material') {
       return { text: 'This machine\'s group key could not be read, so it cannot take part in its group. Leave the group and join it again with its key.', data: { report } };
     }
-    // The latest shared settings changed on the other machines, each with who made it there and how it was decided.
-    const fromGroup = (report.replication?.recentFromGroup ?? []).map((change) =>
-      `${change.path}${change.deleted ? ' removed' : ''} on ${plain(change.machine)}, ${when(change.at)}: by ${plain(describeReplicaAct(change.act))}`);
-    // What does not cross from another machine, and why: never lost silently.
-    // A member known to run an older release is said as exactly that, never as out of step.
-    const older = report.replication?.olderReleaseMembers ?? [];
-    const olderRelease = older.map((machine) => `${plain(machine)} runs an older release; its changes cross once it is updated.`);
-    const notTaken = [
-      ...(report.replication?.notTakenFrom ?? []).filter((peer) => !peer.olderRelease && !older.includes(peer.machine)).map((peer) =>
-        `${peer.paths} change${peer.paths === 1 ? '' : 's'} made on ${plain(peer.machine)} outside its settings controls record no one who made ${peer.paths === 1 ? 'it' : 'them'} and ${peer.paths === 1 ? 'was' : 'were'} not taken here; change ${peer.paths === 1 ? 'it' : 'them'} there through its settings to share ${peer.paths === 1 ? 'it' : 'them'}.`),
-      // A change to who you are that arrived without your own act on the machine that wrote it (gate-review-6 G2).
-      ...refusedFromGroup().map((refused) =>
-        `Refused ${when(refused.at)}: ${plain(refused.what)}, written on another machine of the group (record ${plain(refused.origin)}) without your own act there. Only you, signed in or in your own program on that machine, change it. If you did not, remove that machine from the group.`),
-    ];
     return {
       text: [
         `This machine (${plain(report.nodeName)}) is in "${plain(report.groupName)}" with ${report.memberCount} machine${report.memberCount === 1 ? '' : 's'}.`,
         ...(report.keyGeneration !== null ? [`The group key: ${keyChanged(report.keyGeneration, report.keyChangedAt)}.`] : []),
         ...(report.replication?.awaitingSync ? ['This machine does not hold the group\'s settings yet.'] : []),
         ...(report.sharing === 'off' ? ['Sharing is off on this computer, so it is not on the group\'s network: nothing reaches the other machines from it until sharing is on.'] : []),
-        ...olderRelease,
-        ...notTaken,
-        ...(fromGroup.length > 0 ? ['Settings changed on the other machines:', ...fromGroup.map((line) => `  ${line}`)] : []),
       ].join('\n'),
-      data: { report, fromGroup, notTaken, olderRelease },
+      data: { report },
     };
   },
 };

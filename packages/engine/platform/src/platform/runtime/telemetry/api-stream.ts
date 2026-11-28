@@ -70,54 +70,64 @@ export function createTelemetryEventStream(input: CreateTelemetryStreamInput): R
           controller.enqueue(encoder.encode(`id: ${projected.id}\nevent: telemetry\ndata: ${JSON.stringify(projected)}\n\n`));
         }
       }
-      unsub = input.subscribe((record) => {
-        if (closed || !checkAccess()) return;
-        if (!input.matchesRecord(record, input.filter)) return;
-        // A client that stopped reading would otherwise queue every event for the stream's lifetime.
-        if ((controller.desiredSize ?? 1) <= 0) {
-          stop();
-          return;
-        }
-        const projected = sanitizeRecord(record, input.view);
-        controller.enqueue(encoder.encode(`id: ${projected.id}\nevent: telemetry\ndata: ${JSON.stringify(projected)}\n\n`));
-      });
-      sseSubscribers.set(input.getSubscriberCount(), { stream_type: 'telemetry' });
-      const heartbeat = setInterval(() => {
-        if (closed || !checkAccess()) return;
-        // The same rule as events: a client that stopped reading is closed
-        // rather than left to queue heartbeats when no event matches its filter.
-        if ((controller.desiredSize ?? 1) <= 0) {
-          stop();
-          return;
-        }
-        controller.enqueue(encoder.encode(': heartbeat\n\n'));
-      }, 15_000);
-      (heartbeat as unknown as { unref?: () => void }).unref?.();
+      let heartbeat: ReturnType<typeof setInterval> | null = null;
+      const abort = (): void => stop();
       teardown = (): void => {
+        if (closed) return;
         closed = true;
-        clearInterval(heartbeat);
+        if (heartbeat !== null) {
+          clearInterval(heartbeat);
+          heartbeat = null;
+        }
         unsub();
         input.request.signal.removeEventListener('abort', abort);
         sseSubscribers.set(input.getSubscriberCount(), { stream_type: 'telemetry' });
       };
-      const abort = (): void => stop();
-      input.request.signal.addEventListener('abort', abort, { once: true });
-      // An abort that happened before this listener existed will never fire it.
-      if (input.request.signal.aborted) {
-        stop();
-        return;
+      try {
+        unsub = input.subscribe((record) => {
+          if (closed || !checkAccess()) return;
+          if (!input.matchesRecord(record, input.filter)) return;
+          // A client that stopped reading would otherwise queue every event for the stream's lifetime.
+          if ((controller.desiredSize ?? 1) <= 0) {
+            stop();
+            return;
+          }
+          const projected = sanitizeRecord(record, input.view);
+          controller.enqueue(encoder.encode(`id: ${projected.id}\nevent: telemetry\ndata: ${JSON.stringify(projected)}\n\n`));
+        });
+        sseSubscribers.set(input.getSubscriberCount(), { stream_type: 'telemetry' });
+        heartbeat = setInterval(() => {
+          if (closed || !checkAccess()) return;
+          // The same rule as events: a client that stopped reading is closed
+          // rather than left to queue heartbeats when no event matches its filter.
+          if ((controller.desiredSize ?? 1) <= 0) {
+            stop();
+            return;
+          }
+          controller.enqueue(encoder.encode(': heartbeat\n\n'));
+        }, 15_000);
+        (heartbeat as unknown as { unref?: () => void }).unref?.();
+        input.request.signal.addEventListener('abort', abort, { once: true });
+        // An abort that happened before this listener existed will never fire it.
+        if (input.request.signal.aborted) {
+          stop();
+          return;
+        }
+        controller.enqueue(encoder.encode(`event: ready\ndata: ${JSON.stringify({
+          version: 1,
+          capabilities: input.getCapabilities(),
+          view: input.view,
+          rawAccessible: input.rawAccessible,
+          // A cursor the history no longer holds is not refused: the stream
+          // resumes from the oldest record held and says records may be missing.
+          ...(requestedCursor && resume && !resume.gap ? { resumedFrom: requestedCursor } : {}),
+          ...(resume?.gap ? { gap: true } : {}),
+          ...(resume?.truncated ? { truncated: true } : {}),
+        })}\n\n`));
+      } catch (error) {
+        teardown();
+        throw error;
       }
-      controller.enqueue(encoder.encode(`event: ready\ndata: ${JSON.stringify({
-        version: 1,
-        capabilities: input.getCapabilities(),
-        view: input.view,
-        rawAccessible: input.rawAccessible,
-        // A cursor the history no longer holds is not refused: the stream
-        // resumes from the oldest record held and says records may be missing.
-        ...(requestedCursor && resume && !resume.gap ? { resumedFrom: requestedCursor } : {}),
-        ...(resume?.gap ? { gap: true } : {}),
-        ...(resume?.truncated ? { truncated: true } : {}),
-      })}\n\n`));
     },
     cancel: () => {
       teardown();

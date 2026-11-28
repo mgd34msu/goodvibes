@@ -118,8 +118,8 @@ function classOf(principal: ActorPrincipal, _owner: OwnerIdentity): ActorClass {
     default:
       // A principal the transport did not name a credential for (an in-process
       // caller built from a stored pairing): its admin flag is all it carries.
-      if (principal.principalKind === 'user') return principal.admin === true ? 'admin' : 'member';
-      return principal.admin === true ? 'admin' : 'device';
+      if (principal.principalKind === 'user') return principal.admin === true ? 'owner' : 'member';
+      return principal.admin === true ? 'owner' : 'device';
   }
 }
 

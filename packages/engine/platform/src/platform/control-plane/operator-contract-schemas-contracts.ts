@@ -378,6 +378,8 @@ export const CONTRACT_VIEW_SCHEMA = objectSchema({
   answer: STRING_SCHEMA,
   statusLine: STRING_SCHEMA,
   commit: objectSchema({ status: enumSchema(CONTRACT_COMMIT_STATUSES), hash: STRING_SCHEMA, note: STRING_SCHEMA }, ['status', 'note']),
+  budgetSetByOwner: BOOLEAN_SCHEMA,
+  heldChange: objectSchema({ at: NUMBER_SCHEMA, step: STRING_SCHEMA, said: STRING_SCHEMA }, ['at', 'said']),
   failureKind: enumSchema(CONTRACT_FAILURE_KINDS),
   error: STRING_SCHEMA,
   createdAt: NUMBER_SCHEMA,

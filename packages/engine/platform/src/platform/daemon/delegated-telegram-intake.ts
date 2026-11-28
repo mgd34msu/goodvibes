@@ -192,6 +192,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     let onAbort: (() => void) | undefined;
     const bounded = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => reject(new Error('Telegram account verification timed out')), 5_000);
+      timer.unref?.();
       onAbort = () => reject(new Error('Telegram account verification cancelled'));
       signal?.addEventListener('abort', onAbort, { once: true });
     });
@@ -233,16 +234,27 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     this.deps.accounts.assertCurrent(handle);
     const expectedAccount = choice.accountId.replace(/^@/, '').trim().toLowerCase();
     if (expectedAccount !== account.id && expectedAccount !== account.username.toLowerCase()) return delegatedHold('account-not-chosen', { route: 'selected-and-held', accountIdentity: account, nextStep: `Call inbound.telegram.configure with accountId set to the account shown in accountIdentity. ${stillSelected}` });
+    const previous = this.configurations.get(key);
+    previous?.controller.abort();
+    if (previous) clearTimeout(previous.timer);
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), choice.configurationLifetimeMs); timer.unref();
     const config: Configuration = { id: `telegram-config-${randomUUID()}`, choice: Object.freeze({ ...choice }), owner, expected, account,
       revision: randomUUID(), controller, timer, expiresAt: Date.now() + choice.configurationLifetimeMs };
-    this.configurations.set(key, config); this.assertConfiguration(config);
-    // The owner's retention choice is saved with the chat, so after a restart a third party's message waits for the owner.
-    const saved = this.selected.get(key);
-    if (saved && saved.retentionMs !== choice.pendingRetentionMs) {
-      this.selected.set(key, { ...saved, retentionMs: choice.pendingRetentionMs });
-      const selection = { selected: [...this.selected.values()] };
-      await this.selectionWrites.run(() => this.selectionStore.persist(selection, { durable: true }));
+    this.configurations.set(key, config);
+    try {
+      this.assertConfiguration(config);
+      // The owner's retention choice is saved with the chat, so after a restart a third party's message waits for the owner.
+      const saved = this.selected.get(key);
+      if (saved && saved.retentionMs !== choice.pendingRetentionMs) {
+        this.selected.set(key, { ...saved, retentionMs: choice.pendingRetentionMs });
+        const selection = { selected: [...this.selected.values()] };
+        await this.selectionWrites.run(() => this.selectionStore.persist(selection, { durable: true }));
+      }
+    } catch (error) {
+      controller.abort();
+      clearTimeout(timer);
+      if (this.configurations.get(key) === config) this.configurations.delete(key);
+      throw error;
     }
     this.replayWaiting(key, handle);
     return { outcome: 'configured', configurationId: config.id, accountIdentity: account, expiresAt: config.expiresAt, pendingRetentionMs: choice.pendingRetentionMs,

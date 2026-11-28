@@ -205,9 +205,9 @@ function unsandboxed(reach: Reach): boolean {
   return reach.probe.sandboxed !== true;
 }
 
-/** Code of another language, read whole: it names the product or its home, or (with no sandbox) does what this cannot follow. */
+/** Code of another language, read whole: matches only when it names the product or its home. */
 function codeReaches(text: string, reach: Reach): boolean {
-  return mentionsProduct(text, reach) || (unsandboxed(reach) && codeBuildsReach(text));
+  return mentionsProduct(text, reach);
 }
 
 /** Code reaching the person's home by a path it builds (expanduser, HOME, `~/`), whatever it joins to it. */

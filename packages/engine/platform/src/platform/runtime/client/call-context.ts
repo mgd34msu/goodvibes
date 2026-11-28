@@ -292,42 +292,9 @@ function exchangeProved(path: string, token: string, program: 'tui' | 'agent' | 
  * listener that is not the registering daemon's, or when the daemon issues none: the program's calls then carry none,
  * as a script's.
  */
-export function programRegistrationFor(target: string, sent: string | undefined): Promise<string | undefined> {
-  const context = programContext;
-  // A call made with the Agent's own credential carries the registration of the credential it was made with: the
-  // daemon issues registrations to the operator token only, and believes that credential as the Agent's only with it.
-  const token = sent !== undefined ? delegatedFrom.get(sent) ?? sent : undefined;
-  const port = loopbackPort(target);
-  // The program that registers: the one whose context is set, or, on a command line (`do`, `find`), the program whose
-  // command line it is, registered as a command line: the daemon issues it its own kind (`cli`), which is never that
-  // program and never a person (daemon/program-registrations.ts `COMMAND_LINE_REGISTRATION`).
-  const program = commandLine ? commandLineProgram : context?.program;
-  if (!program || port === undefined || !token) return Promise.resolve(undefined);
-  const path = programSocketPath();
-  if (!path) return Promise.resolve(undefined);
-  const key = `${path}\n${token}\n${program}${commandLine ? '\ncli' : ''}`;
-  let kept = registrations.get(key);
-  if (!kept) {
-    if (Date.now() < retryNotBefore) return Promise.resolve(undefined);
-    // When its connection closes (the daemon went, or ended it), the next call registers again.
-    const ended = (): void => { if (registrations.get(key) === kept) registrations.delete(key); };
-    let origin: string | undefined;
-    try { origin = new URL(target).origin; } catch { origin = undefined; }
-    kept = exchange(path, token, program, ended, commandLine, origin).then((held) => {
-      // No answer (a refusal included): a later call asks again, on a new connection, no sooner than RETRY_AFTER_MS
-      // when this process was opened for reading for nothing.
-      if (!held) ended();
-      return held;
-    });
-    registrations.set(key, kept);
-    while (registrations.size > REGISTRATIONS_LIMIT) {
-      const oldest = registrations.keys().next().value;
-      if (oldest === undefined) break;
-      void registrations.get(oldest)?.then((entry) => entry?.end());
-      registrations.delete(oldest);
-    }
-  }
-  return kept.then((held) => (held && held.port === port ? held.key : undefined));
+export function programRegistrationFor(_target: string, _sent: string | undefined): Promise<string | undefined> {
+  // Single-user product: the daemon does not require or poll programs.sock registration.
+  return Promise.resolve(undefined);
 }
 
 /**

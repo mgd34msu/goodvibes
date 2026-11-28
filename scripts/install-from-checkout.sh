@@ -101,4 +101,4 @@ fi
 chmod 755 "$work/bin/bun" "$work/bin/node"
 export PATH="$work/bin:$PATH"
 cd "$root"
-"$work/bin/bun" "$root/scripts/install.ts" --runtime-dir "$work/bin" "$@"
+"$work/bin/bun" --no-env-file --config=/dev/null "$root/scripts/install.ts" --runtime-dir "$work/bin" "$@"

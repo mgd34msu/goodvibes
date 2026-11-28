@@ -317,7 +317,7 @@ export async function judgePeer(reading: PeerReading, claimed: PeerProgram, uid:
     } else {
       return { why: 'the daemon is neither the installed product (no recorded programs beside it) nor run from source' };
     }
-    if (program !== claimed) return { why: `it is ${programWords(program)}, not the program it named` };
+    if (!program || program !== claimed) return { why: `it is ${program ? programWords(program) : 'an unknown program'}, not the program it named` };
     const exeIno = String(reading.exeStat.ino);
     // Code mapped from a file the account can write: a library the dynamic loader was told to load (LD_PRELOAD, LD_AUDIT,
     // LD_LIBRARY_PATH from a writable folder), seen even when the process rewrote its environment. Code with no file the

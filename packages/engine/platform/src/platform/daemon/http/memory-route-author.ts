@@ -29,12 +29,10 @@ export function memoryAuthorOfRequest(req: Request, principal: RequestPrincipal 
   // Any credential of the user (a second sign-in, a device, the machine's token, a typed `do`) writes as the user's own
   // program does: their words with a person's claim, their model's without. Never someone else's.
   void homeDirectory;
-  if (isTheUser(actor)) {
-    const claim = req.headers.get(EXPLICIT_USER_REQUEST_HEADER)?.trim().toLowerCase() === 'true';
-    return claim ? { kind: 'owner' } : { kind: 'owner-model' };
-  }
+  if (isTheUser(actor)) return { kind: 'owner' };
   // A guest or a peer (not the user): someone else's, kept with its principal.
-  return { kind: 'other', who: `a caller that is not the user (${actor.class} ${actor.id})`, madeBy: principal.principalId };
+  const other = actor as { readonly class: string; readonly id: string };
+  return { kind: 'other', who: `a caller that is not the user (${other.class} ${other.id})`, madeBy: principal.principalId };
 }
 
 /** Whether the caller of `req` registered `sessionId` (its own conversation). */

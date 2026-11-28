@@ -187,7 +187,7 @@ export function createWorkPlans(deps: {
       const read = cause as { readonly party?: unknown; readonly who?: unknown; readonly madeFor?: unknown } | null;
       const madeFor = typeof read?.madeFor === 'string' && read.madeFor ? { madeFor: read.madeFor } : {};
       if (read?.party === 'owner') causes.set(workId, { party: 'owner', ...madeFor });
-      else if (read?.party === 'other') causes.set(workId, { party: 'other', who: typeof read.who === 'string' && read.who ? read.who : UNRECORDED_WORK_CAUSE.who, ...madeFor });
+      else if (read?.party === 'other') causes.set(workId, { party: 'other', who: typeof read.who === 'string' && read.who ? read.who : 'an earlier caller', ...madeFor });
     }
     for (const [workId, entry] of Object.entries(stored.plans ?? {})) {
       // A plan being written when the daemon stopped was never finished: it is written again on the next Start.

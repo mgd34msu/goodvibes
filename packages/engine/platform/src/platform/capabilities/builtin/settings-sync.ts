@@ -284,14 +284,23 @@ export const SETTINGS_SYNC_PULL: Definition = {
   },
   async run(values: ActionValues, services, caller): Promise<CapabilityResult> {
     const path = values.filesAt === 'program' ? values.path! : services.programSettings.resolvePath(caller, values.path!);
-    const failed = (error: unknown): never => {
+    const failed = (error: unknown, appliedSoFar: readonly { readonly owner: Owner; readonly backup?: string | null; readonly settingsPath: string }[] = []): never => {
       recordSettingsSyncFailure('settings-sync', reason(error), services.settingsSync.daemon().getControlPlaneConfigDir());
+      if (appliedSoFar.length > 0) {
+        noteListChanged({ list: 'settings-sync', change: 'changed' });
+        const summary = appliedSoFar.map((entry) => (entry.backup
+          ? `${OWNER_WORDS[entry.owner]} (backup kept at ${entry.backup})`
+          : OWNER_WORDS[entry.owner])).join(', ');
+        const msg = `Partially pulled: ${summary} already applied before failure: ${reason(error)}.`;
+        throw new CapabilityRefusal(msg, 'Restore from the kept backup file(s) if you want to revert the earlier part.');
+      }
       throw error instanceof CapabilityRefusal ? error : new CapabilityRefusal(`Not pulled: ${reason(error)}.`, 'Look inside a sync bundle shows what it holds.');
     };
     let bundle: OwnedBundle;
     try { bundle = readBundle(path, caller, values.filesAt === 'program' ? values.content ?? '' : undefined); } catch (error) { return failed(error); }
     const lines: string[] = [];
     const applied: { owner: Owner; applied: number; conflicts: number; locked: readonly string[] }[] = [];
+    const appliedBackups: { owner: Owner; backup: string | null; settingsPath: string }[] = [];
     const left: { owner: Owner; count: number }[] = [];
     const heldBack: IncomingSettingChange<ConfigKey>[] = [];
     for (const part of partsOf(bundle, caller)) {
@@ -310,20 +319,21 @@ export const SETTINGS_SYNC_PULL: Definition = {
       const before = `${settingsPath}.before-pull-${new Date().toISOString().replace(/[:.]/g, '-')}`;
       let kept: string | null = null;
       if (changes.length > 0 && existsSync(settingsPath)) {
-        try { copyFileSync(settingsPath, before); kept = before; } catch (error) { return failed(new Error(`${Whose(part.owner)} settings from before could not be kept at ${before} (${reason(error)}), so nothing of its part was pulled`)); }
+        try { copyFileSync(settingsPath, before); kept = before; } catch (error) { return failed(new Error(`${Whose(part.owner)} settings from before could not be kept at ${before} (${reason(error)}), so nothing of its part was pulled`), appliedBackups); }
       }
       try {
         // Only the values that differ are set: setting a running daemon's listener to the value it has would still
         // make it bind again, closing every connection, the asking one included.
         const result = applySettingsSyncBundle(config, { ...bundle, settings: Object.fromEntries(changes) }, path);
         applied.push({ owner: part.owner, applied: result.appliedCount, conflicts: result.conflictCount, locked: result.skippedLockedKeys ?? [] });
+        appliedBackups.push({ owner: part.owner, backup: kept, settingsPath });
         // A key a managed lock holds was left, not changed.
         const taken = changes.filter(([key]) => !(result.skippedLockedKeys ?? []).includes(key));
         lines.push(`${Whose(part.owner)} settings: ${result.appliedCount} applied, ${taken.length} changed${result.skippedLockedKeys?.length ? `, ${result.skippedLockedKeys.length} left because managed locks own them (${result.skippedLockedKeys.join(', ')})` : ''}.`);
         if (taken.length > 0) lines.push(`  Changed: ${taken.map(([key]) => key).join(', ')}.`);
         if (kept) lines.push(`  To put them back: the file as it was is kept as ${kept}; copy it over ${settingsPath}.`);
       } catch (error) {
-        return failed(error);
+        return failed(error, appliedBackups);
       }
     }
     for (const part of left) lines.push(`Left: ${OWNER_WORDS[part.owner]}'s part (${part.count} settings); pull the same file from ${OWNER_WORDS[part.owner]} to apply it there.`);

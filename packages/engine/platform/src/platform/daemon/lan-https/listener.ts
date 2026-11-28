@@ -51,6 +51,7 @@ export class LanHttpsListener {
   private server: { stop(closeActiveConnections?: boolean): unknown } | null = null;
   private current: LanHttpsState = { serving: false };
   private queue: Promise<void> = Promise.resolve();
+  private generation = 0;
   private observer: SyncObserver | null = null;
   private syncWaiters: (() => void)[] = [];
   readonly secureAddress: SecureAddressService;
@@ -89,14 +90,20 @@ export class LanHttpsListener {
   /** Start, restart with a fresh certificate, or stop, as the settings say now. One at a time; never throws. */
   sync(plainHost: string, serve: Serve): Promise<void> {
     this.bound = { host: plainHost, serve };
-    const run = this.queue.then(() => this.syncNow(plainHost, serve));
+    const gen = ++this.generation;
+    const run = this.queue.then(() => this.syncNow(plainHost, serve, gen));
     this.queue = run.catch(() => {});
     return run;
   }
 
-  private async syncNow(plainHost: string, serve: Serve): Promise<void> {
+  private async syncNow(plainHost: string, serve: Serve, gen: number): Promise<void> {
+    if (gen !== this.generation || this.bound === null) {
+      for (const resolve of this.syncWaiters.splice(0)) resolve();
+      return;
+    }
     try {
       await this.stopServer();
+      if (gen !== this.generation || this.bound === null) return;
       const config = this.deps.config();
       const following = this.secureAddress.groupFollowing();
       // A node follows its lead: https is on here because it is on there, on this machine's own https port.
@@ -108,6 +115,7 @@ export class LanHttpsListener {
         return;
       }
       const resolved = await this.secureAddress.resolve();
+      if (gen !== this.generation || this.bound === null) return;
       if (!resolved.ok) { this.current = { serving: false, port, source, problem: resolved.problem }; return; }
       const certificate = resolved.certificate;
       try {
@@ -147,13 +155,21 @@ export class LanHttpsListener {
 
   /** Close it; `detached`: the plain listener is gone too, so a settings change starts nothing until the next bind. */
   async stop(detached = false): Promise<void> {
-    if (detached) this.bound = null;
-    await this.stopServer();
-    if (this.current.serving) {
-      this.current = { serving: false };
-      this.secureAddress.noteServed(null);
-      noteServedHttps(null);
+    this.generation += 1;
+    if (detached) {
+      this.bound = null;
+      this.secureAddress.dispose();
     }
+    const done = this.queue.then(async () => {
+      await this.stopServer();
+      if (this.current.serving) {
+        this.current = { serving: false };
+        this.secureAddress.noteServed(null);
+        noteServedHttps(null);
+      }
+    });
+    this.queue = done.catch(() => {});
+    await done;
   }
 }
 

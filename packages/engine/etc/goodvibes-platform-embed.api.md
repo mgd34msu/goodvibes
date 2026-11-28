@@ -72,18 +72,22 @@ export class ApprovalBroker {
     get eventPublisher(): Pick<ApprovalPublisher, 'publishEvent'> | null;
     // (undocumented)
     getApproval(approvalId: string): SharedApprovalRecord | null;
+    historyPath(): string;
     get homeNode(): string;
     // Warning: (ae-forgotten-export) The symbol "UserPermissionRuleStore" needs to be exported by the entry point embed.d.ts
+    //
+    // (undocumented)
     keepRememberedRulesIn(store: Pick<UserPermissionRuleStore, 'remember'>): void;
     // Warning: (ae-forgotten-export) The symbol "SharedApprovalRecord" needs to be exported by the entry point embed.d.ts
     //
     // (undocumented)
     listApprovals(limit?: number): SharedApprovalRecord[];
     onApproved(approvalId: string, effect: () => unknown | Promise<unknown>, handler?: string): () => void;
-    presentationOf(record: SharedApprovalRecord, full?: boolean): AskPresentation | undefined;
+    // (undocumented)
+    presentationOf(given: SharedApprovalRecord, full?: boolean): AskPresentation | undefined;
     // Warning: (ae-forgotten-export) The symbol "RequestSharedApprovalInput" needs to be exported by the entry point embed.d.ts
     // Warning: (ae-forgotten-export) The symbol "RaisedApproval" needs to be exported by the entry point embed.d.ts
-    raiseApproval(input: RequestSharedApprovalInput): Promise<RaisedApproval>;
+    raiseApproval(given: RequestSharedApprovalInput): Promise<RaisedApproval>;
     // Warning: (ae-forgotten-export) The symbol "RaisedOwnerApproval" needs to be exported by the entry point embed.d.ts
     raiseOwnerApproval(input: RequestSharedApprovalInput & {
         readonly requireOwnerDecision: OwnerApprovalGuard;
@@ -100,6 +104,7 @@ export class ApprovalBroker {
     releaseApproval(approvalId: string, input: Omit<ApprovalActionInput, 'expectedRevision'> & {
         readonly holdId?: string | undefined;
     }): Promise<TransitionOutcome>;
+    releaseHoldsOfGonePrograms(): Promise<void>;
     requestApproval(input: RequestSharedApprovalInput): Promise<PermissionPromptDecision>;
     // Warning: (ae-forgotten-export) The symbol "ResolveSharedApprovalInput" needs to be exported by the entry point embed.d.ts
     //
@@ -109,12 +114,14 @@ export class ApprovalBroker {
     //
     // (undocumented)
     setPublisher(publisher: ApprovalPublisher | null): void;
+    shownRecord(record: SharedApprovalRecord): SharedApprovalRecord;
     // (undocumented)
     start(): Promise<void>;
     // Warning: (ae-forgotten-export) The symbol "ApprovalListener" needs to be exported by the entry point embed.d.ts
     //
     // (undocumented)
     subscribe(listener: ApprovalListener): () => void;
+    useAskerNames(resolve: ((principalId: string, kept: string) => string | undefined) | null): void;
     useHomeNode(nodeId: string | (() => string)): void;
     // Warning: (ae-forgotten-export) The symbol "AskPresentation" needs to be exported by the entry point embed.d.ts
     usePresentation(presenter: ((request: PermissionPromptRequest, sessionId?: string | undefined) => AskPresentation) | null): void;
@@ -206,6 +213,7 @@ export class DaemonServer {
         readonly sessionId: string;
         readonly task: string;
         readonly workingDirectory?: string | undefined;
+        readonly inputParty?: TurnInputParty | undefined;
     }): Promise<AgentRecord>;
     // (undocumented)
     stop(): Promise<void>;
@@ -296,6 +304,7 @@ export type EmbeddedSubmission = SharedSessionSubmission & {
 export interface EmbedSessionOptions {
     readonly boot?: Partial<Omit<BootDaemonOptions, 'workingDir' | 'homeDirectory' | 'token'>> | undefined;
     readonly homeDirectory: string;
+    readonly inputParty?: TurnInputParty | undefined;
     readonly mcpServers?: readonly McpServerConfig[] | undefined;
     readonly requestPermission?: PermissionRequestHandler | undefined;
     readonly surfaceId?: string | undefined;
@@ -309,11 +318,13 @@ export interface EmbedSessionOptions {
 export interface PermissionPromptDecision {
     // (undocumented)
     approved: boolean;
+    heldForOwner?: boolean | undefined;
     modifiedArgs?: Record<string, unknown> | undefined;
     reason?: string | undefined;
     remember?: boolean | undefined;
     rememberTier?: RememberTier | undefined;
     settledBy?: 'sandbox' | undefined;
+    unanswered?: 'withdrawn' | 'timed-out' | undefined;
 }
 
 // @public (undocumented)
@@ -333,8 +344,10 @@ export interface PermissionPromptRequest {
     // (undocumented)
     category: PermissionCategory;
     containable?: true | undefined;
+    outsideFolder?: true | undefined;
     // Warning: (ae-forgotten-export) The symbol "OwnerOnlyKind" needs to be exported by the entry point embed.d.ts
     ownerOnly?: OwnerOnlyKind | undefined;
+    ownerOnlyBecause?: string | undefined;
     rememberOptions?: readonly RememberTierOption[] | undefined;
     // (undocumented)
     tool: string;
@@ -481,6 +494,7 @@ export class SharedSessionBroker {
     // Warning: (ae-forgotten-export) The symbol "RegisterSharedSessionInput" needs to be exported by the entry point embed.d.ts
     // Warning: (ae-forgotten-export) The symbol "SharedSessionRegisterResult" needs to be exported by the entry point embed.d.ts
     register(input: RegisterSharedSessionInput): Promise<SharedSessionRegisterResult>;
+    registrantOf(sessionId: string): string | undefined;
     // (undocumented)
     reopenSession(sessionId: string): Promise<SharedSessionRecord | null>;
     // Warning: (ae-forgotten-export) The symbol "NativeConversationTurnPermit" needs to be exported by the entry point embed.d.ts
@@ -584,12 +598,13 @@ export interface SubmitSharedSessionMessageInput {
 
 // Warnings were encountered during analysis:
 //
-// platform/src/platform/control-plane/approval-broker.ts:810:66 - (ae-forgotten-export) The symbol "OwnerApprovalGuard" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/session-broker.ts:249:5 - (ae-forgotten-export) The symbol "PersistentStore" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/session-broker.ts:249:5 - (ae-forgotten-export) The symbol "SharedSessionStoreSnapshot" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/session-broker.ts:251:5 - (ae-forgotten-export) The symbol "RouteBindingManager" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/session-broker.ts:252:5 - (ae-forgotten-export) The symbol "SharedSessionAgentStatusProvider" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/session-broker.ts:253:5 - (ae-forgotten-export) The symbol "SharedSessionMessageSender" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/session-broker.ts:258:5 - (ae-forgotten-export) The symbol "ConversationGateConfigReader" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/approval-broker.ts:908:66 - (ae-forgotten-export) The symbol "OwnerApprovalGuard" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/session-broker.ts:255:5 - (ae-forgotten-export) The symbol "PersistentStore" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/session-broker.ts:255:5 - (ae-forgotten-export) The symbol "SharedSessionStoreSnapshot" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/session-broker.ts:257:5 - (ae-forgotten-export) The symbol "RouteBindingManager" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/session-broker.ts:258:5 - (ae-forgotten-export) The symbol "SharedSessionAgentStatusProvider" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/session-broker.ts:259:5 - (ae-forgotten-export) The symbol "SharedSessionMessageSender" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/session-broker.ts:264:5 - (ae-forgotten-export) The symbol "ConversationGateConfigReader" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/daemon/facade.ts:691:5 - (ae-forgotten-export) The symbol "TurnInputParty" needs to be exported by the entry point embed.d.ts
 
 ```

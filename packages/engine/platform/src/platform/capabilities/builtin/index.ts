@@ -33,8 +33,6 @@ import { DOCUMENTS_CAPABILITIES } from './documents.js';
 import { AGENT_HOMES_CAPABILITIES } from './agent-homes.js';
 import { DEVICES_CAPABILITIES, DEVICES_MIGRATE_SHARED } from './devices.js';
 import { TAILSCALE_CAPABILITIES } from './tailscale.js';
-import { CALLER_PROJECTS_CAPABILITIES, type CallerProjectsCapabilityServices } from './devices-projects.js';
-import { CALLER_SHARED_CAPABILITIES, type CallerSharedCapabilityServices } from './devices-shared.js';
 import { NETWORK_SIGN_IN_ACCOUNT } from './network-account.js';
 import { DEVICES_SESSION_CAPABILITIES } from './devices-session.js';
 import { CLUSTER_CAPABILITIES, type ClusterCapabilityServices } from './cluster.js';
@@ -229,10 +227,6 @@ export type DaemonCapabilityServices = HooksCapabilityServices & SecretsCapabili
   & NetworkScanCapabilityServices
   // Devices and network (builtin/settings-sync.ts): the daemon's own settings, beside the asking program's.
   & SettingsSyncCapabilityServices
-  // Devices and network, Permissions and safety (builtin/devices-projects.ts): the projects each device or member may work in.
-  & CallerProjectsCapabilityServices
-  // Devices and network (builtin/devices-shared.ts): what of the owner's shared things each caller may reach.
-  & CallerSharedCapabilityServices
   // Waiting for you (builtin/waiting.ts): the daemon's one owner inbox.
   & WaitingCapabilityServices
   // Permissions and safety (builtin/permissions.ts, security.ts): the one rule store, the token audit, folder trust.
@@ -358,9 +352,6 @@ export const DAEMON_CAPABILITIES: readonly Moved<DaemonCapabilityServices>[] = [
   ...SETTINGS_SYNC_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'settings-sync', title: 'Settings sync' } })),
   // A device on the old shared token given its own; the token is the outcome's reveal (builtin/devices.ts).
   { definition: DEVICES_MIGRATE_SHARED as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'devices', title: 'Paired devices' } },
-  // The projects a paired device or a member may work in, given and taken by the owner (builtin/devices-projects.ts).
-  ...CALLER_PROJECTS_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'devices', title: 'Paired devices' } })),
-  ...CALLER_SHARED_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'devices', title: 'Paired devices' } })),
   // The account that signs in from other devices, made on Addresses and ports (builtin/network-account.ts).
   { definition: NETWORK_SIGN_IN_ACCOUNT as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'devices', title: 'Paired devices' } },
   // Waiting for you, Purchases (builtin/purchases.ts): the purchases that wait on the owner, and what they do on each.

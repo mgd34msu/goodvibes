@@ -238,7 +238,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     if (judgment.decisionLogNotice) daemonReceiptStoreAt(daemonReceiptsPath(configManager)).record(judgment.decisionLogNotice);
     // Each terminal program's own secrets, copied once into this daemon's store, which every program reads first
     // (secrets-carry-forward.ts); the programs' files are left as they are. Off the start path: two small reads.
-    void carryProgramSecretsToDaemon({ globalHome: homeDirectory, daemonHome: resolveGoodVibesDaemonHome(homeDirectory) }).then((carried) => {
+    void carryProgramSecretsToDaemon({ globalHome: homeDirectory, daemonHome: daemonHomeDirectory }).then((carried) => {
       const line = carried ? describeSecretsCarryForward(carried) : undefined;
       if (line) daemonReceiptStoreAt(daemonReceiptsPath(configManager)).record(line, { audience: 'owner' });
     }).catch((error: unknown) => {
@@ -246,7 +246,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     });
     // The Agent's own pinned models, providers of your own and services, copied once into the daemon's, which every
     // program reads now (provider-stores-carry-forward.ts); the Agent's files are left as they are. Off the start path.
-    void carryAgentProviderStoresToDaemon({ homeDirectory, daemonHome: resolveGoodVibesDaemonHome(homeDirectory) }).then((carried) => {
+    void carryAgentProviderStoresToDaemon({ homeDirectory, daemonHome: daemonHomeDirectory }).then((carried) => {
       const line = carried ? describeProviderStoresCarryForward(carried) : undefined;
       if (line) daemonReceiptStoreAt(daemonReceiptsPath(configManager)).record(line, { audience: 'owner' });
     }).catch((error: unknown) => {
@@ -600,7 +600,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       for (const folder of formerDaemonFolders(homeDirectory, daemonHomeDirectory, workingDirectory)) {
         await noteDaemonFolderRules(graph.userPermissionRuleStore, folder, announcements, approvalBroker);
       }
-    })();
+    })().catch((error: unknown) => logger.warn('[Permissions] former daemon folder rules could not be migrated', { error: summarizeError(error) }));
     // Every committed write to a native request is announced, so a client showing native requests reads them again on it.
     disposalScope.registry.add('native request change events', knowledgeStore.onNativeRequestChange((change) => {
       emitNativeRequestChanged(options.runtimeBus, { sessionId: 'system', traceId: `native-request:${change.projectId}:${Date.now()}`, source: 'native-work' }, change);
@@ -616,7 +616,10 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     disposalScope.registry.add('native hosted conversation binding', removeHostedProjects);
     // A CI watch made by a project's work: its native continuation is held by that project's records, so every read or
     // change of it goes to the project whose store holds it, among the projects made so far and every registered one.
-    const projectHoldingCiWatch = async (watch: Parameters<NonNullable<typeof ciNativeContinuationOwner>>[0]) => {
+    const withProjectHoldingCiWatch = async <T>(
+      watch: Parameters<NonNullable<typeof ciNativeContinuationOwner>>[0],
+      run: (host: Awaited<ReturnType<ProjectWork['activation']['acquire']>>) => T | Promise<T>,
+    ): Promise<T | undefined> => {
       const continuationId = watch.continuationId;
       if (!continuationId) return undefined;
       // A read of the continuation's one row in a project's store, nothing built for a project that does not hold it.
@@ -626,14 +629,18 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       const roots = [...new Set([...projectWork.all().map((work) => work.hosted.projectRoot), ...registeredWorkspaceRoots(homeDirectory)])];
       for (const root of roots) {
         if (!await holds(await projectIdentityOfFolder(configManager, root))) continue;
-        await projectWork.ensure(root);
-        return projectWork.get(root).activation.acquire();
+        const release = await projectWork.acquire(root);
+        try {
+          return await run(await projectWork.get(root).activation.acquire());
+        } finally {
+          release();
+        }
       }
       throw Object.assign(new Error(`The CI watch ${watch.id} names work whose project is none of the registered projects, so it was neither repaired nor changed. Register the project its work was in.`),
         { code: 'NO_PROJECT', status: 422 });
     };
-    ciNativeContinuationRevocation = async watch => { const host = await projectHoldingCiWatch(watch); if (host) await host.revokeCiWatch(watch); };
-    ciNativeContinuationOwner = async watch => (await projectHoldingCiWatch(watch))?.recoverCiWatchOwner(watch);
+    ciNativeContinuationRevocation = async (watch) => { await withProjectHoldingCiWatch(watch, (host) => host.revokeCiWatch(watch)); };
+    ciNativeContinuationOwner = async (watch) => withProjectHoldingCiWatch(watch, (host) => host.recoverCiWatchOwner(watch));
     // A settings or scope change stops the continuations that no longer hold, in every project whose Work is made.
     ciNativeContinuationReconcile = async () => (await Promise.all(projectWork.all().map(async (work) => {
       const open = (await knowledgeStore.openNativeWorkExecutionStorage(work.projectId)).continuations?.listOpen?.() ?? [];
@@ -651,97 +658,123 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       const readBinding = createLocalWorkLedgerReadBinding({ available: true, projectId, actorId: 'host:operator-ledger-read',
         allowLegacyProvenance: true, service: ledger.service, authority: ledger.authority });
       if (!readBinding.available) { await ledger.close(); throw new Error(readBinding.reason); }
-      // Held for good: this graph's turns use the project's hooks and long-output folder for as long as it runs.
-      const turns = projectTurns.hold(root);
-      const projectIndex = new ProjectIndex(root);
-      // Its turns' tools are rooted in its folder, with its hooks and its own long-output folder; never the daemon's.
-      // The graph's own folder is this project: its turns and runs take the project's environment (projectFacilities).
-      const toolDependencies = { ...agentToolDependencies, workingDirectory: root, fileCache: new FileStateCache(), projectIndex,
-        ownFolderIsProject: true, workPlan: undefined, codeIndex: undefined, codeIndexReindexScheduler: undefined,
-        capabilityTools: { ...agentToolDependencies.capabilityTools, workingDirectory: () => root },
-        ...(turns.toolCallHooks ? { toolCallHooks: turns.toolCallHooks } : {}), ...(turns.overflowHandler ? { overflowHandler: turns.overflowHandler } : {}) };
-      const plans = createWorkPlans({
-        drafts: createWorkstreamDraftService({ agentManager, configManager, projectRoot: root, contractRunner, sessionId, pricing: providerRegistry }),
-        // Kept with the daemon's records, one file per project, never inside the project (carried once from the home's
-        // terminal folder, where an earlier build kept it, that file left as it was).
-        file: carriedRecordsFile(shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'work-plans', `${projectId}.json`),
-          shellPaths.resolveUserPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'work-plans', `${projectId}.json`)),
-        // "Show me the plan before it runs" is the owner's own "ask me" rule for a plan, so it is read as the released
-        // modes read such a rule: in every mode but YOLO (which reads no rule). The mode in force for THIS project.
-        showPlanFirst: () => configManager.get('planner.showPlanFirst') === true
-          && normalizePermissionMode(ownerModeInForce(root) ?? configManager.get('permissions.mode')) !== 'yolo',
-        // Its `work` notices name this project (the one project identity), so only its screens read again.
-        project: projectIdentityOf(root),
-      });
-      // This project's old planning records (an earlier version's planning sources and work-plan tasks, each naming the
-      // project it was kept for) carried into its Work once, by the host itself (workflow/work-ledger/carry-old-records.ts);
-      // off the making's path, the old records untouched. A 3.5.0 daemon's own folder was a project: its Work is made at
-      // start (below), so its records are carried there.
-      void carryOldWorkRecords({
-        hostId: ledger.importHostId, projectId, service: ledger.service, authority: ledger.authority,
-        ready: () => knowledgeStore.init(),
-        readSource: (id) => knowledgeStore.getLegacyImportRecord(id),
-        sourceIds: () => oldPlanningSourceIds(knowledgeStore, projectId),
-        announcements,
-      }).catch((error: unknown) => logger.warn('[Work] old planning records could not be carried into Work', { project: root, error: summarizeError(error) }));
-      // This project's work made before causes were kept is the owner's, with nothing asked (old-work-cause.ts).
-      void keepOldWorkAsOwners({ projectId, service: ledger.service, authority: ledger.authority, plans, ready: () => knowledgeStore.init() })
-        .catch((error: unknown) => logger.warn('[Work] old work could not be recorded as the owner\'s', { project: root, error: summarizeError(error) }));
-      // Contracts a terminal program was running itself in this project (3.5.0's own runner), carried once into its
-      // Work as proposed work with their remaining steps; their files are only read (carry-program-contracts.ts).
+      let turnsHeld = false;
+      let projectIndex: ProjectIndex | undefined;
+      let submission: ReturnType<typeof createNativeWorkSubmissionHost> | undefined;
+      let conversationStorage: Awaited<ReturnType<typeof knowledgeStore.openNativeConversationStorage>> | undefined;
+      let intake: ReturnType<typeof createNativeConversationIntakeHost> | undefined;
+      let activation: ReturnType<typeof createDaemonNativeWorkExecutionActivation> | undefined;
       try {
-        carryProgramContracts({ projectRoot: root, plans, carriedFile: carriedRecordsFile(
-          shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'carried-program-contracts', `${projectId}.json`),
-          shellPaths.resolveUserPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'carried-program-contracts', `${projectId}.json`)) });
-      } catch (error) { logger.warn('[Work] a program\'s contracts could not be carried into Work', { error: summarizeError(error) }); }
-      const submission = createNativeWorkSubmissionHost({ projectRoot: root, projectId, sessionId, service: ledger.service, authority: ledger.authority,
-        scopes: nativeScopes, registerScope: async (folder: string) => { await nativeScopes.add(folder, { origin: 'work-request' }); } });
-      let hostedOwner: NativeConversationContinuationOwner | undefined;
-      const continuation: NativeConversationContinuationOwner = {
-        capture: (id, principalId, selectedDiff) => {
-          if (!hostedOwner) throw new Error('Native hosted continuation owner unavailable');
-          return hostedOwner.capture(id, principalId, selectedDiff);
-        },
-        assertCurrent: (context, principalId, source) => {
-          if (!hostedOwner) throw new Error('Native hosted continuation owner unavailable');
-          hostedOwner.assertCurrent(context, principalId, source);
-        },
-      };
-      // This Work's own conversation storage: closed with it (the knowledge store keeps an open one until it is closed).
-      const conversationStorage = await knowledgeStore.openNativeConversationStorage(projectId);
-      const intake = createNativeConversationIntakeHost({ projectRoot: root, projectId, sessionId, storage: conversationStorage,
-        scopes: nativeScopes, port: judgment.port, decisionLog: judgment.decisionLog, proposer: createNativeRequirementProposer(providerRegistry), continuation,
-        artifacts: graph.artifactStore });
-      const activation = createDaemonNativeWorkExecutionActivation({
-        workPlans: plans, nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(),
-        runtimeBus: options.runtimeBus, configManager, providerRegistry, projectRoot: root, projectId, sessionId, acpHost, knowledgeStore,
-        nativeScopes, continuationGrants: pairingTokens,
-        continuationScopeOwner: { current: () => { if (!continuationScopeOwner) throw new Error('Native CI scope owner is unavailable'); return continuationScopeOwner.current(); } },
-        judgmentPort: judgment.port, decisionLog: judgment.decisionLog,
-        permissionManager, hookDispatcher, featureFlags, toolDependencies,
-        additionalFleetOwnership: () => agentManager.fleetOwnership(), contractOperator,
-        notifyFleetSlotReleased: () => agentManager.notifyFleetSlotReleased(),
-        onFleetSlotReleased: (listener) => agentManager.onFleetSlotReleased(listener),
-      });
-      // The native turn host made over this Work's intake (hosted-sessions-composition.ts): asked whether a turn runs, and
-      // closed with this Work.
-      let turnHost: { busy(): boolean; close(): Promise<void> } | undefined;
-      return {
-        projectId, reader: readBinding.client, submission, intake, activation, plans,
-        hosted: { projectId, projectRoot: root, intake, journalPath: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'native-hosted-turns', `${projectId}.json`),
-          installContinuationOwner: (owner) => { hostedOwner = owner; },
-          principalCanAct: (principalId) => pairingTokens.nativePrincipalCurrent(principalId),
-          adopt: (host) => { turnHost = host; } },
-        busy: () => activation.fleetOwnership().length > 0 || turnHost?.busy() === true,
-        async close() {
-          readBinding.client.dispose();
-          try { await turnHost?.close(); } catch (error) { logger.warn('[Work] a project\'s native turn host was not closed cleanly', { project: root, error: summarizeError(error) }); }
-          hostedOwner = undefined;
-          try { await Promise.all([submission.close(), intake.close(), activation.close()]); await conversationStorage.close(); }
-          // The project's facilities this Work held go with it (released once nothing else holds them).
-          finally { await ledger.close(); await projectIndex.dispose(); projectTurns.unhold(root); }
-        },
-      };
+        // Held for good: this graph's turns use the project's hooks and long-output folder for as long as it runs.
+        const turns = projectTurns.hold(root);
+        turnsHeld = true;
+        projectIndex = new ProjectIndex(root);
+        // Its turns' tools are rooted in its folder, with its hooks and its own long-output folder; never the daemon's.
+        // The graph's own folder is this project: its turns and runs take the project's environment (projectFacilities).
+        const toolDependencies = { ...agentToolDependencies, workingDirectory: root, fileCache: new FileStateCache(), projectIndex,
+          ownFolderIsProject: true, workPlan: undefined, codeIndex: undefined, codeIndexReindexScheduler: undefined,
+          capabilityTools: { ...agentToolDependencies.capabilityTools, workingDirectory: () => root },
+          ...(turns.toolCallHooks ? { toolCallHooks: turns.toolCallHooks } : {}), ...(turns.overflowHandler ? { overflowHandler: turns.overflowHandler } : {}) };
+        const plans = createWorkPlans({
+          drafts: createWorkstreamDraftService({ agentManager, configManager, projectRoot: root, contractRunner, sessionId, pricing: providerRegistry }),
+          // Kept with the daemon's records, one file per project, never inside the project (carried once from the home's
+          // terminal folder, where an earlier build kept it, that file left as it was).
+          file: carriedRecordsFile(shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'work-plans', `${projectId}.json`),
+            shellPaths.resolveUserPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'work-plans', `${projectId}.json`)),
+          // "Show me the plan before it runs" is the owner's own "ask me" rule for a plan, so it is read as the released
+          // modes read such a rule: in every mode but YOLO (which reads no rule). The mode in force for THIS project.
+          showPlanFirst: () => configManager.get('planner.showPlanFirst') === true
+            && normalizePermissionMode(ownerModeInForce(root) ?? configManager.get('permissions.mode')) !== 'yolo',
+          // Its `work` notices name this project (the one project identity), so only its screens read again.
+          project: projectIdentityOf(root),
+        });
+        // This project's old planning records (an earlier version's planning sources and work-plan tasks, each naming the
+        // project it was kept for) carried into its Work once, by the host itself (workflow/work-ledger/carry-old-records.ts);
+        // off the making's path, the old records untouched. A 3.5.0 daemon's own folder was a project: its Work is made at
+        // start (below), so its records are carried there.
+        void carryOldWorkRecords({
+          hostId: ledger.importHostId, projectId, service: ledger.service, authority: ledger.authority,
+          ready: () => knowledgeStore.init(),
+          readSource: (id) => knowledgeStore.getLegacyImportRecord(id),
+          sourceIds: () => oldPlanningSourceIds(knowledgeStore, projectId),
+          announcements,
+        }).catch((error: unknown) => logger.warn('[Work] old planning records could not be carried into Work', { project: root, error: summarizeError(error) }));
+        // This project's work made before causes were kept is the owner's, with nothing asked (old-work-cause.ts).
+        void keepOldWorkAsOwners({ projectId, service: ledger.service, authority: ledger.authority, plans, ready: () => knowledgeStore.init() })
+          .catch((error: unknown) => logger.warn('[Work] old work could not be recorded as the owner\'s', { project: root, error: summarizeError(error) }));
+        // Contracts a terminal program was running itself in this project (3.5.0's own runner), carried once into its
+        // Work as proposed work with their remaining steps; their files are only read (carry-program-contracts.ts).
+        try {
+          carryProgramContracts({ projectRoot: root, plans, carriedFile: carriedRecordsFile(
+            shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'carried-program-contracts', `${projectId}.json`),
+            shellPaths.resolveUserPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'carried-program-contracts', `${projectId}.json`)) });
+        } catch (error) { logger.warn('[Work] a program\'s contracts could not be carried into Work', { error: summarizeError(error) }); }
+        submission = createNativeWorkSubmissionHost({ projectRoot: root, projectId, sessionId, service: ledger.service, authority: ledger.authority,
+          scopes: nativeScopes, registerScope: async (folder: string) => { await nativeScopes.add(folder, { origin: 'work-request' }); } });
+        let hostedOwner: NativeConversationContinuationOwner | undefined;
+        const continuation: NativeConversationContinuationOwner = {
+          capture: (id, principalId, selectedDiff) => {
+            if (!hostedOwner) throw new Error('Native hosted continuation owner unavailable');
+            return hostedOwner.capture(id, principalId, selectedDiff);
+          },
+          assertCurrent: (context, principalId, source) => {
+            if (!hostedOwner) throw new Error('Native hosted continuation owner unavailable');
+            hostedOwner.assertCurrent(context, principalId, source);
+          },
+        };
+        // This Work's own conversation storage: closed with it (the knowledge store keeps an open one until it is closed).
+        conversationStorage = await knowledgeStore.openNativeConversationStorage(projectId);
+        intake = createNativeConversationIntakeHost({ projectRoot: root, projectId, sessionId, storage: conversationStorage,
+          scopes: nativeScopes, port: judgment.port, decisionLog: judgment.decisionLog, proposer: createNativeRequirementProposer(providerRegistry), continuation,
+          artifacts: graph.artifactStore });
+        activation = createDaemonNativeWorkExecutionActivation({
+          workPlans: plans, nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(),
+          runtimeBus: options.runtimeBus, configManager, providerRegistry, projectRoot: root, projectId, sessionId, acpHost, knowledgeStore,
+          nativeScopes, continuationGrants: pairingTokens,
+          continuationScopeOwner: { current: () => { if (!continuationScopeOwner) throw new Error('Native CI scope owner is unavailable'); return continuationScopeOwner.current(); } },
+          judgmentPort: judgment.port, decisionLog: judgment.decisionLog,
+          permissionManager, hookDispatcher, featureFlags, toolDependencies,
+          additionalFleetOwnership: () => agentManager.fleetOwnership(), contractOperator,
+          notifyFleetSlotReleased: () => agentManager.notifyFleetSlotReleased(),
+          onFleetSlotReleased: (listener) => agentManager.onFleetSlotReleased(listener),
+        });
+        const builtIndex = projectIndex;
+        const builtSubmission = submission;
+        const builtStorage = conversationStorage;
+        const builtIntake = intake;
+        const builtActivation = activation;
+        // The native turn host made over this Work's intake (hosted-sessions-composition.ts): asked whether a turn runs, and
+        // closed with this Work.
+        let turnHost: { busy(): boolean; close(): Promise<void> } | undefined;
+        return {
+          projectId, reader: readBinding.client, submission: builtSubmission, intake: builtIntake, activation: builtActivation, plans,
+          hosted: { projectId, projectRoot: root, intake: builtIntake, journalPath: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'native-hosted-turns', `${projectId}.json`),
+            installContinuationOwner: (owner) => { hostedOwner = owner; },
+            principalCanAct: (principalId) => pairingTokens.nativePrincipalCurrent(principalId),
+            adopt: (host) => { turnHost = host; } },
+          busy: () => builtActivation.fleetOwnership().length > 0 || turnHost?.busy() === true,
+          async close() {
+            readBinding.client.dispose();
+            try { await turnHost?.close(); } catch (error) { logger.warn('[Work] a project\'s native turn host was not closed cleanly', { project: root, error: summarizeError(error) }); }
+            hostedOwner = undefined;
+            try { await Promise.all([builtSubmission.close(), builtIntake.close(), builtActivation.close()]); await builtStorage.close(); }
+            // The project's facilities this Work held go with it (released once nothing else holds them).
+            finally { await ledger.close(); await builtIndex.dispose(); projectTurns.unhold(root); }
+          },
+        };
+      } catch (error) {
+        readBinding.client.dispose();
+        await Promise.allSettled([
+          submission?.close(),
+          intake?.close(),
+          activation?.close(),
+        ]);
+        await conversationStorage?.close().catch(() => {});
+        await ledger.close().catch(() => {});
+        await projectIndex?.dispose().catch(() => {});
+        if (turnsHeld) projectTurns.unhold(root);
+        throw error;
+      }
     };
     // At most a bound of projects' Work open; past it the least recently used that nothing holds is let go
     // (project-work-set.ts), and made again by the next request naming the project.

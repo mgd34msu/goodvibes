@@ -70,7 +70,6 @@ const loopPieces: readonly unknown[] = [
   client.sessionSpine,
   client.memoryAccess,
   client.workflow,
-  client.mcpRegistry,
   client.fileCache,
   client.projectIndex,
 ] as const;

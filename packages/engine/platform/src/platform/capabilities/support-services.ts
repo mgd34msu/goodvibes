@@ -61,21 +61,32 @@ export function createSupportCapabilityServices(sources: DaemonCapabilityService
         try { skillCount = SkillLibrary.forPaths({ workingDirectory: folder, goodvibesRoot: goodvibesRoot(), surfaceRoot: program }).list().length; } catch { skillCount = 0; }
         let pluginList: readonly { readonly name: string }[] = [];
         let quarantinedPluginCount = 0;
+        let pluginsProblem: string | null = null;
         try {
           const manager = plugins.forProject(folder)?.manager;
           pluginList = manager?.list() ?? [];
           quarantinedPluginCount = manager ? pluginList.filter((plugin) => manager.getQuarantineRecord(plugin.name) !== undefined).length : 0;
-        } catch { pluginList = []; }
+        } catch (error) {
+          pluginList = [];
+          pluginsProblem = errorText(error);
+        }
         // The tool servers of the asking project: its own files and the owner's (mcp/config.ts), not every server the
         // daemon has started; a server's quarantine is the daemon's reading of it, when the daemon knows it.
-        const known = (() => { try { return sources.mcpRegistry?.listServerSecurity() ?? []; } catch { return []; } })();
+        let mcpProblem: string | null = null;
+        const known = (() => {
+          try { return sources.mcpRegistry?.listServerSecurity() ?? []; }
+          catch (error) { mcpProblem = errorText(error); return []; }
+        })();
         const mcpServers = (() => {
           try {
             return loadMcpEffectiveConfig({ workingDirectory: folder, homeDirectory: home() }).servers.map(({ server }) => {
               const running = known.find((entry) => entry.name === server.name);
               return { name: server.name, trustMode: running?.trustMode ?? server.trustMode, schemaFreshness: running?.schemaFreshness };
             });
-          } catch { return []; }
+          } catch (error) {
+            mcpProblem = mcpProblem ? `${mcpProblem}; ${errorText(error)}` : errorText(error);
+            return [];
+          }
         })();
         const providerCount = (() => { try { return sources.providerRegistry?.listModels().length ?? 0; } catch { return 0; } })();
         const oauthProviderCount = Object.values(serviceConfigs).filter((service) => service.authType === 'oauth' && service.oauth).length;
@@ -103,10 +114,17 @@ export function createSupportCapabilityServices(sources: DaemonCapabilityService
               : serviceIssues.length === 0 ? `${services.length} service(s), ${oauthProviderCount + builtinSubscriptionProviderCount} oauth provider(s), ${activeSubscriptionCount} active subscription override(s)`
                 : `${serviceIssues.length} service configuration issue(s)`,
           },
-          { severity: quarantinedPluginCount === 0 ? 'pass' : 'warn', area: 'plugins', message: quarantinedPluginCount === 0 ? `${pluginList.length} plugin(s) discovered` : `${quarantinedPluginCount} plugin(s) quarantined` },
           {
-            severity: quarantinedMcpCount === 0 && elevatedMcpCount === 0 ? 'pass' : 'warn', area: 'mcp',
-            message: quarantinedMcpCount > 0 || elevatedMcpCount > 0 ? `${quarantinedMcpCount} quarantined, ${elevatedMcpCount} elevated` : `${mcpServers.length} tool server(s) set up for this project`,
+            severity: pluginsProblem !== null || quarantinedPluginCount > 0 ? 'warn' : 'pass',
+            area: 'plugins',
+            message: pluginsProblem !== null ? `plugins could not be inspected: ${pluginsProblem}`
+              : quarantinedPluginCount === 0 ? `${pluginList.length} plugin(s) discovered` : `${quarantinedPluginCount} plugin(s) quarantined`,
+          },
+          {
+            severity: mcpProblem !== null || quarantinedMcpCount > 0 || elevatedMcpCount > 0 ? 'warn' : 'pass',
+            area: 'mcp',
+            message: mcpProblem !== null ? `MCP servers could not be inspected: ${mcpProblem}`
+              : quarantinedMcpCount > 0 || elevatedMcpCount > 0 ? `${quarantinedMcpCount} quarantined, ${elevatedMcpCount} elevated` : `${mcpServers.length} tool server(s) set up for this project`,
           },
           {
             // Hooks are optional: no hooks file is information, a file whose hooks cannot load is an issue.

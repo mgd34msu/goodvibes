@@ -60,7 +60,7 @@ export function createRewindPlanHandler(service: Pick<UnifiedRewindService, 'pla
     const params = readInvocationParams(invocation);
     const { anchor, scope } = readAnchor(params);
     admitConversationRewind(invocation, scope, anchor.sessionId, owners);
-    return service.plan(anchor, scope);
+    return service.plan(anchor, scope, { project: invocation.context.call?.project });
   };
 }
 
@@ -71,7 +71,7 @@ export function createRewindApplyHandler(service: Pick<UnifiedRewindService, 'ap
     admitConversationRewind(invocation, scope, anchor.sessionId, owners);
     const confirmToken = optionalString(params.confirmToken, 'confirmToken');
     try {
-      return await service.apply(anchor, scope, { confirmToken });
+      return await service.apply(anchor, scope, { confirmToken, project: invocation.context.call?.project });
     } catch (error) {
       if (error instanceof RewindTokenError) {
         throw new GatewayVerbError(error.message, 'INVALID_ARGUMENT', 400, 'confirmToken');

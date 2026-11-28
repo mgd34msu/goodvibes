@@ -23,8 +23,8 @@ release.
    current release.
 4. Regenerate what carries the version: `bun run refresh:contracts`,
    `bun run agent-spec:generate`, `bun run llms:generate`,
-   `bun run --cwd products/webui release:prepare`, `bun run build`,
-   `bun run api:extract` and `bun run api:subpath`.
+   `bun run --cwd products/webui release:prepare`, `bun run build`, and
+   `bun run api:extract`.
 5. Commit, push to `main`, and wait for the CI workflow to finish green on that
    commit.
 

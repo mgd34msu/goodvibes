@@ -15,6 +15,7 @@ import { resolveDoctorExitCode } from './doctor-exit.ts';
 import { buildCliServicePosture } from './service-posture.ts';
 import { inspectCliExternalRuntime } from './external-runtime.ts';
 import { inspectConnectedHostMetrics } from './connected-host-metrics.ts';
+import { DAEMON_STATE_SURFACE_ROOT } from '@goodvibes/engine/platform/platform/daemon/lifecycle-marker';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { writeExitingStdoutLine } from '../utils/fatal-boot-write.ts';
 import { readCheckpointRegistrationSetting } from '@goodvibes/engine/platform/platform/config/checkpoint-settings';
@@ -54,8 +55,8 @@ export async function runOnboardingStatusCommand(runtime: StatusCommandRuntime):
 export async function runStatusCommand(runtime: StatusCommandRuntime): Promise<number> {
   const { cli, configManager, workingDirectory, homeDirectory } = runtime;
   const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
-  const userStorePath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-users.json');
-  const bootstrapCredentialPath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-bootstrap.txt');
+  const userStorePath = shellPaths.resolveUserPath(DAEMON_STATE_SURFACE_ROOT, 'auth-users.json');
+  const bootstrapCredentialPath = shellPaths.resolveUserPath(DAEMON_STATE_SURFACE_ROOT, 'auth-bootstrap.txt');
   const operatorTokenPath = connectedHostOperatorTokenPath(homeDirectory);
   const onboardingMarker = readOnboardingDoneMarker(shellPaths);
   const service = await buildCliServicePosture({ configManager, workingDirectory, homeDirectory });

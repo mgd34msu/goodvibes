@@ -1,4 +1,5 @@
 import { refusal } from '@goodvibes/engine/errors';
+import { summarizeError } from '../../utils/index.js';
 import { DiscordIntegration, SlackIntegration } from '../../integrations/index.js';
 import type { ProviderRuntimeSurface } from '../provider-runtime.js';
 import { describeActorAdmission, type ChannelPolicyManager } from '../policy-manager.js';
@@ -354,17 +355,18 @@ async function runProviderSetupAction(
     const hasDirectSlackSecret = Boolean(directBotToken || directSigningSecret || directAppToken);
     if (hasDirectSlackSecret || defaultChannel || workspaceId) {
       // Enabled only when a credential that resolves exists (just stored, or
-      // already linked), never for metadata alone.
-      const configured = Boolean(hasDirectSlackSecret || account.secrets.some((entry) => entry.configured && entry.resolved !== false));
-      if (configured) {
-        context.deps.configManager.set('surfaces.slack.enabled', true);
-      }
-      const refreshed = await context.buildAccount('slack');
-      const unreadable = storedButUnreadable(refreshed, [
+      // already linked), never for metadata alone or unreadable stored secrets.
+      const preliminary = await context.buildAccount('slack');
+      const unreadable = storedButUnreadable(preliminary, [
         ...(directBotToken ? ['primary'] : []),
         ...(directSigningSecret ? ['signingSecret'] : []),
         ...(directAppToken ? ['appToken'] : []),
       ]);
+      const configured = Boolean(hasDirectSlackSecret || account.secrets.some((entry) => entry.configured && entry.resolved !== false));
+      if (configured && unreadable.length === 0) {
+        context.deps.configManager.set('surfaces.slack.enabled', true);
+      }
+      const refreshed = configured && unreadable.length === 0 ? await context.buildAccount('slack') : preliminary;
       const savedMetadata = [
         ...(defaultChannel ? ['default channel'] : []),
         ...(workspaceId ? ['workspace id'] : []),
@@ -473,7 +475,6 @@ async function runProviderSetupAction(
     const botToken = readString(input?.botToken);
     if (botToken) {
       await storeSurfaceSecret(context.deps, 'discord', 'primary', botToken, readSecretScope(input?.secretScope));
-      context.deps.configManager.set('surfaces.discord.enabled', true);
     }
     const configuredApplicationId = String(context.deps.configManager.get('surfaces.discord.applicationId') || '');
     const applicationId = (readString(input?.applicationId) ?? configuredApplicationId) || process.env.DISCORD_APPLICATION_ID;
@@ -481,8 +482,12 @@ async function runProviderSetupAction(
     if (readString(input?.applicationId)) context.deps.configManager.set('surfaces.discord.applicationId', readString(input?.applicationId)!);
     if (guildId) context.deps.configManager.set('surfaces.discord.guildId', guildId);
     if (readString(input?.defaultChannelId)) context.deps.configManager.set('surfaces.discord.defaultChannelId', readString(input?.defaultChannelId)!);
-    const refreshed = await context.buildAccount('discord');
-    const unreadable = storedButUnreadable(refreshed, botToken ? ['primary'] : []);
+    const preliminary = await context.buildAccount('discord');
+    const unreadable = storedButUnreadable(preliminary, botToken ? ['primary'] : []);
+    if (botToken && unreadable.length === 0) {
+      context.deps.configManager.set('surfaces.discord.enabled', true);
+    }
+    const refreshed = botToken && unreadable.length === 0 ? await context.buildAccount('discord') : preliminary;
     return {
       ...base,
       ok: Boolean(botToken || applicationId) && unreadable.length === 0,
@@ -523,19 +528,19 @@ async function runProviderSetupAction(
     if (chatTopic) await storeSurfaceSecret(context.deps, 'ntfy', 'chatTopic', chatTopic, topicScope);
     if (agentTopic) await storeSurfaceSecret(context.deps, 'ntfy', 'agentTopic', agentTopic, topicScope);
     if (remoteTopic) await storeSurfaceSecret(context.deps, 'ntfy', 'remoteTopic', remoteTopic, topicScope);
-    // A new server with a new token: the old token is cleared first, so it is never sent to the new server.
+    // Store the new token before switching baseUrl so a secret-store failure never leaves baseUrl changed without its token.
     if (baseUrl && token && baseUrl !== context.deps.configManager.get('surfaces.ntfy.baseUrl')) context.deps.configManager.set('surfaces.ntfy.token', '');
-    if (baseUrl) context.deps.configManager.set('surfaces.ntfy.baseUrl', baseUrl);
     if (token) await storeSurfaceSecret(context.deps, 'ntfy', 'primary', token, readSecretScope(input?.secretScope));
+    if (baseUrl) context.deps.configManager.set('surfaces.ntfy.baseUrl', baseUrl);
     const configured = Boolean(topic || chatTopic || agentTopic || remoteTopic || token || account.configured);
-    // A call that supplied nothing, on an account with nothing set up, must not
-    // switch the surface on and report success.
-    if (configured) context.deps.configManager.set('surfaces.ntfy.enabled', true);
-    const refreshed = await context.buildAccount('ntfy');
-    const unreadable = storedButUnreadable(refreshed, [
+    const preliminary = await context.buildAccount('ntfy');
+    const unreadable = storedButUnreadable(preliminary, [
       ...(token ? ['primary'] : []), ...(topic ? ['topic'] : []), ...(chatTopic ? ['chatTopic'] : []),
       ...(agentTopic ? ['agentTopic'] : []), ...(remoteTopic ? ['remoteTopic'] : []),
     ]);
+    // A call that supplied nothing, or stored unreadable secrets, must not switch the surface on.
+    if (configured && unreadable.length === 0) context.deps.configManager.set('surfaces.ntfy.enabled', true);
+    const refreshed = configured && unreadable.length === 0 ? await context.buildAccount('ntfy') : preliminary;
     return {
       ...base,
       ok: configured && unreadable.length === 0,
@@ -583,19 +588,36 @@ async function runProviderLogoutAction(
     };
   }
   if (context.deps.providerRuntime) context.deps.providerRuntime.stop(surface);
+  setSurfaceEnabled(context.deps, surface, false);
   // Every credential the setup schema declares for the surface, each removed
   // where setup stores it (its secret-store key and, when it has one, its setting).
+  const removalErrors: string[] = [];
   for (const target of getBuiltinSetupSchema(surface).secretTargets) {
-    await clearSurfaceSecret(context.deps, surface, target.id);
+    try {
+      await clearSurfaceSecret(context.deps, surface, target.id);
+    } catch (error) {
+      removalErrors.push(`${target.id}: ${summarizeError(error)}`);
+    }
   }
   const refreshed = await context.buildAccount(surface);
+  if (removalErrors.length > 0) {
+    return {
+      ...base,
+      ok: false,
+      account: refreshed,
+      state: refreshed.state,
+      authState: refreshed.authState,
+      message: `${surface} was disabled, but some credentials could not be removed (${removalErrors.join('; ')}).`,
+      metadata: { action, envBacked: providerEnvBacked(surface), removalErrors },
+    };
+  }
   return {
     ...base,
     ok: true,
     account: refreshed,
     state: refreshed.state,
     authState: refreshed.authState,
-    message: `${surface} GoodVibes-managed credentials removed. Environment variables, if present, still take precedence.`,
+    message: `${surface} disabled and GoodVibes-managed credentials removed. Environment variables, if present, still take precedence.`,
     metadata: { action, envBacked: providerEnvBacked(surface) },
   };
 }

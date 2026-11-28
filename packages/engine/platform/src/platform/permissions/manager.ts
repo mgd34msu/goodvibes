@@ -1485,11 +1485,9 @@ export class PermissionManager {
     const decided = askedByOwnerRule(classifyCall(mode, this.callFacts({
       toolName, args, category, mode, surface: effectSurface, definition, ownerOnly, ownerOnlyBecause: cause?.because,
       directory: capturedAuthority.directory, rule,
-      // A turn whose reads were evicted before they could be checked still read something untrusted.
-      // Or any earlier turn of this conversation did: what a conversation read stays read (security/conversation-exposure.ts).
+      // Turn-scoped untrusted read (v3.5.0 contract): outward calls skip allow rules and go to Jev/mode judgment.
       untrustedRead: (Array.isArray(exposure) && exposure.length > 0)
-        || (rawAuthority as { readonly exposureCoverage?: { readonly complete?: unknown } }).exposureCoverage?.complete === false
-        || conversationExposedNow(),
+        || (rawAuthority as { readonly exposureCoverage?: { readonly complete?: unknown } }).exposureCoverage?.complete === false,
       declaredReadOnly: asCommands === undefined && preparedCall?.registry.isPreparedReadOnly(preparedCall.call) === true,
       ...(options.ownerConfirmed === true ? { ownerConfirmed: true } : {}),
     })), ownerAsk);
@@ -2044,23 +2042,8 @@ export class PermissionManager {
     // A call refused whatever anyone answers is refused before any question (gate/classify.ts): a channel conversation
     // with no project changing something.
     const channelWithoutProject = channelWithoutProjectRefusalFor(i.toolName);
-    // What runs by itself later (a schedule, a trigger, a watcher, a task, work), from a turn that read text anyone can
-    // write: the owner's, asked in every mode (yolo included), each time; never made unasked from what the turn read.
-    const runsLaterFromRead = i.untrustedRead && i.ownerOnly !== 'owner-act' && runsLaterCall(i.args, i.definition);
-    // The same rule for sending, spending and loosening, after a read in this turn or any earlier turn of the
-    // conversation (security/conversation-exposure.ts): an owner-only call of those kinds, and a capability that sends or
-    // spends, is asked each time in every mode, never settled by a remembered yes or by the mode.
-    // And a file write of what steers a model in a later conversation (a project's instruction file, a skill, an agent
-    // definition): the owner's acceptance before it exists, not after (security/conversation-exposure.ts).
-    const sendsSpendsLoosensFromRead = !runsLaterFromRead && i.untrustedRead && i.ownerOnly !== 'owner-act'
-      && ((i.ownerOnly !== undefined && EXPOSED_ASKED_KINDS.has(i.ownerOnly)) || sendsOrSpendsCall(i.args, i.definition)
-        || (i.category === 'write' && (paths ?? []).some(steersAModelPath)));
-    const ownerOnly = runsLaterFromRead ? 'loosen-security' as const
-      : sendsSpendsLoosensFromRead ? (i.ownerOnly ?? 'untrusted-derived-send') : i.ownerOnly;
-    // The owner's card says the conversation read text from outside, and where (the line the owner is asked with).
-    const exposedWords = runsLaterFromRead || sendsSpendsLoosensFromRead ? exposureWordsNow() : undefined;
-    const ownerOnlyBecause = runsLaterFromRead ? [RUNS_LATER_FROM_READ_BECAUSE, exposedWords].filter(Boolean).join('. ')
-      : sendsSpendsLoosensFromRead ? [i.ownerOnlyBecause ?? SENDS_FROM_READ_BECAUSE, exposedWords].filter(Boolean).join('. ') : i.ownerOnlyBecause;
+    const ownerOnly = i.ownerOnly;
+    const ownerOnlyBecause = i.ownerOnlyBecause;
     return {
       ...(party.party === 'other' ? { otherParty: party.who, ...(i.definition?.heldToBoundary === true ? { heldToBoundary: true } : {}) } : {}),
       ...(channelWithoutProject !== undefined ? { channelWithoutProject } : {}),
@@ -2070,10 +2053,9 @@ export class PermissionManager {
       recoverable: declaredRecoverable(i.definition, i.args),
       ownerOnly, untrustedRead: i.untrustedRead, declaredReadOnly: i.declaredReadOnly,
       ...(ownerOnlyBecause !== undefined ? { ownerOnlyBecause } : {}),
-      ...(runsLaterFromRead || sendsSpendsLoosensFromRead ? { ownerOnlyOnce: true } : {}),
       ...(i.ownerOnly === 'owner-act' ? { ownerActWords: ownerActWordsOf(i.args, i.definition), ownerActAsked: ownerActAsked(i.args, i.definition),
         ownerActOnce: ownerActOnce(i.args, i.definition) } : {}),
-      // A command that runs one of the product's own programs or touches the GoodVibes home: answered each time.
+      // A command that explicitly touches GoodVibes' own programs or home directory: answered each time.
       ...(i.ownerOnly === 'loosen-security' && reachesProductPastGate(i.toolName, i.args, i.definition, i.directory ?? undefined, productHomeDirectories(), productReachProbe(this.configReader.getSetting?.('sandbox.enabled')))
         ? { ownerOnlyOnce: true } : {}),
       // A project whose trust cannot be read or resolved counts as restricted (fail closed), as on the autonomous path.
@@ -2434,7 +2416,7 @@ export class PermissionManager {
     const decided = askedByOwnerRule(classifyCall(mode, this.callFacts({
       toolName, args, category, mode, surface, definition, ownerOnly, ownerOnlyBecause: cause?.because,
       directory, rule,
-      untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).hasIngestedThisTurn() || conversationExposedNow(),
+      untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).hasIngestedThisTurn(),
     })), ownerAsk);
     const policyResult = this.policyResultOf(decided, withOwnerAsk(baseAnalysis, ownerAsk, decided));
     const safety = await this.assessExecutionSafety({
@@ -2525,7 +2507,7 @@ export class PermissionManager {
     const decided = classifyCall(mode, this.callFacts({
       toolName, args: captured, category, mode, surface: this.gate.surfaceOf?.(), definition, ownerOnly,
       directory: this.directoryHere(), rule,
-      untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).hasIngestedThisTurn() || conversationExposedNow(),
+      untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).hasIngestedThisTurn(),
     }));
     return { mode, category, decided };
   }

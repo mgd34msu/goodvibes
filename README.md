@@ -57,7 +57,7 @@ and adds `~/.local/bin` to your `PATH` when it is missing. It needs no Bun,
 Node, Git or compiler. When it finishes, it prints the command to start with
 and the web app's address.
 
-- **Pick a version:** `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.5.0 sh`
+- **Pick a version:** `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.6.0 sh`
 - **Skip the service:** add `GOODVIBES_DAEMON_SERVICE=0` the same way.
 - **Updates** install themselves: the daemon checks hourly and waits until no
   work is running, and the terminal apps check when they start. Running the
@@ -275,7 +275,7 @@ By topic:
 - [Chat channels and the daemon's API](products/tui/docs/channels-remote-and-api.md)
 - [Headless runs](products/agent/docs/headless-run.md) and [exit codes](docs/exit-codes.md)
 - [Purchases](packages/engine/docs/payments.md)
-- [Release notes for 3.5.0](docs/releases/3.5.0.md)
+- [Release notes for 3.6.0](docs/releases/3.6.0.md)
 - [Building on the platform](packages/engine/README.md) and [the Jev decision layer](packages/judgment/README.md)
 - For a language model or an agent operating GoodVibes: [docs/llms.txt](docs/llms.txt), a short index of
   the parts of [docs/llms-full.txt](docs/llms-full.txt) (everything in one file, with every setting,

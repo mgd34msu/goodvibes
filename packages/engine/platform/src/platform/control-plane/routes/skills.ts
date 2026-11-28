@@ -59,16 +59,28 @@ function readMetadata(value: unknown): Readonly<Record<string, SkillFrontmatterV
   return out;
 }
 
-function createSkillsListHandler(service: SkillsGatewayService): GatewayMethodHandler {
-  return async () => ({ skills: await service.list() });
+export type SkillsGatewayServiceResolver = SkillsGatewayService | ((project: string | undefined) => SkillsGatewayService);
+
+function resolveSkillsService(resolver: SkillsGatewayServiceResolver, invocation: GatewayMethodInvocation, params?: Record<string, unknown>): SkillsGatewayService {
+  if (typeof resolver !== 'function') return resolver;
+  const rawProject = invocation.context.call?.project
+    ?? (typeof params?.['workingDirectory'] === 'string' && params['workingDirectory'].trim() ? params['workingDirectory'].trim() : undefined);
+  return resolver(rawProject);
 }
 
-function createSkillsGetHandler(service: SkillsGatewayService): GatewayMethodHandler {
+function createSkillsListHandler(resolver: SkillsGatewayServiceResolver): GatewayMethodHandler {
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    return { skills: await resolveSkillsService(resolver, invocation, params).list() };
+  };
+}
+
+function createSkillsGetHandler(resolver: SkillsGatewayServiceResolver): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const name = requireString(params, 'name');
     try {
-      return { skill: await service.get(name) };
+      return { skill: await resolveSkillsService(resolver, invocation, params).get(name) };
     } catch (error) {
       rethrowAsVerbError(error);
     }
@@ -129,11 +141,11 @@ function keptMetadata(
   return out;
 }
 
-function createSkillsCreateHandler(service: SkillsGatewayService): GatewayMethodHandler {
+function createSkillsCreateHandler(resolver: SkillsGatewayServiceResolver): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     try {
-      const skill = await service.create({
+      const skill = await resolveSkillsService(resolver, invocation, params).create({
         name: requireString(params, 'name'),
         description: requireString(params, 'description'),
         body: typeof params.body === 'string' ? params.body : '',
@@ -146,11 +158,12 @@ function createSkillsCreateHandler(service: SkillsGatewayService): GatewayMethod
   };
 }
 
-function createSkillsUpdateHandler(service: SkillsGatewayService): GatewayMethodHandler {
+function createSkillsUpdateHandler(resolver: SkillsGatewayServiceResolver): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const name = requireString(params, 'name');
     try {
+      const service = resolveSkillsService(resolver, invocation, params);
       const existing = await service.get(name);
       const skill = await service.update(name, {
         description: typeof params.description === 'string' ? params.description : undefined,
@@ -164,12 +177,12 @@ function createSkillsUpdateHandler(service: SkillsGatewayService): GatewayMethod
   };
 }
 
-function createSkillsDeleteHandler(service: SkillsGatewayService): GatewayMethodHandler {
+function createSkillsDeleteHandler(resolver: SkillsGatewayServiceResolver): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const name = requireString(params, 'name');
     try {
-      return await service.delete(name);
+      return await resolveSkillsService(resolver, invocation, params).delete(name);
     } catch (error) {
       rethrowAsVerbError(error);
     }
@@ -181,7 +194,7 @@ function createSkillsDeleteHandler(service: SkillsGatewayService): GatewayMethod
  * handler) from ../method-catalog-skills.ts. A missing descriptor is logged and
  * skipped: construction never fails because a wire verb failed to register.
  */
-export function registerSkillsGatewayMethods(catalog: GatewayMethodCatalog, service: SkillsGatewayService): void {
+export function registerSkillsGatewayMethods(catalog: GatewayMethodCatalog, service: SkillsGatewayServiceResolver): void {
   attachHandler(catalog, 'skills.list', createSkillsListHandler(service));
   attachHandler(catalog, 'skills.get', createSkillsGetHandler(service));
   attachHandler(catalog, 'skills.create', createSkillsCreateHandler(service));

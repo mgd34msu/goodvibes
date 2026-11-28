@@ -20,6 +20,7 @@ import {
 import { useToast } from '../../lib/toast';
 import { lastChosenProject } from '../../lib/place-project';
 import { PlaceForm } from './PlaceForm';
+import { ResultPane, type PlaceResult } from './ResultPane';
 import { RevealPane } from './RevealPane';
 
 export function CapabilityRunner({ id, onClose }: { readonly id: string; readonly onClose: () => void }) {
@@ -28,6 +29,7 @@ export function CapabilityRunner({ id, onClose }: { readonly id: string; readonl
   const confirm = useConfirm();
   const [formOpen, setFormOpen] = useState(true);
   const [reveal, setReveal] = useState<CapabilityReveal | undefined>();
+  const [result, setResult] = useState<PlaceResult | undefined>();
   if (!capabilities) return null;
   const capability = resolvePlaceCapability(capabilities, id);
   if (!capability || !capability.runsOnDaemon) {
@@ -57,8 +59,20 @@ export function CapabilityRunner({ id, onClose }: { readonly id: string; readonl
     try {
       // The project last chosen in the places (place-project.ts); none chosen yet, none is sent.
       const answer = await runPlaceCapability(capability.id, values, lastChosenProject());
+      if (answer.reveal) {
+        toast({ title: outcomeLine(capability, values, shown, answer, undefined), tone: 'success' });
+        setReveal(answer.reveal);
+        return;
+      }
+      const whole = (answer.detail ?? answer.text).trim();
+      const sentences = whole.split(/(?<=[.!?:])\s+|\n+/).filter((part) => part.trim() !== '').length;
+      const long = sentences > 3 || whole.length > 400;
+      if (long) {
+        toast({ title: `${capability.action.label}: full answer opened.`, tone: 'success' });
+        setResult({ title: capability.action.label, text: whole });
+        return;
+      }
       toast({ title: outcomeLine(capability, values, shown, answer, undefined), tone: 'success' });
-      if (answer.reveal) { setReveal(answer.reveal); return; }
     } catch (error) {
       toast({ title: `${capability.action.label}: not done.`, description: formatError(error), tone: 'warning', durationMs: 0 });
     }
@@ -74,6 +88,7 @@ export function CapabilityRunner({ id, onClose }: { readonly id: string; readonl
         />
       ) : null}
       {reveal ? <RevealPane reveal={reveal} onClose={onClose} /> : null}
+      {result ? <ResultPane result={result} onClose={onClose} /> : null}
       {confirm.element}
     </>
   );

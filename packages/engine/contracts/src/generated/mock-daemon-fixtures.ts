@@ -7354,6 +7354,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "watch": {
         "id": "sample",
         "continuationId": "sample",
+        "project": "sample",
         "repo": "sample",
         "ref": "sample",
         "prNumber": 0,
@@ -7398,6 +7399,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         {
           "id": "sample",
           "continuationId": "sample",
+          "project": "sample",
           "repo": "sample",
           "ref": "sample",
           "prNumber": 0,
@@ -9683,6 +9685,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "hash": "sample",
           "note": "sample"
         },
+        "budgetSetByOwner": false,
+        "heldChange": {
+          "at": 0,
+          "step": "sample",
+          "said": "sample"
+        },
         "failureKind": "transport",
         "error": "sample",
         "createdAt": 0,
@@ -10943,6 +10951,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "hash": "sample",
         "note": "sample"
       },
+      "budgetSetByOwner": false,
+      "heldChange": {
+        "at": 0,
+        "step": "sample",
+        "said": "sample"
+      },
       "failureKind": "transport",
       "error": "sample",
       "createdAt": 0,
@@ -12201,6 +12215,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "status": "committed",
             "hash": "sample",
             "note": "sample"
+          },
+          "budgetSetByOwner": false,
+          "heldChange": {
+            "at": 0,
+            "step": "sample",
+            "said": "sample"
           },
           "failureKind": "transport",
           "error": "sample",
@@ -13493,6 +13513,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "status": "committed",
           "hash": "sample",
           "note": "sample"
+        },
+        "budgetSetByOwner": false,
+        "heldChange": {
+          "at": 0,
+          "step": "sample",
+          "said": "sample"
         },
         "failureKind": "transport",
         "error": "sample",

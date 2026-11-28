@@ -616,7 +616,10 @@ export const STARTUP_TRANSFER_IMPORT: Def = {
     const own = plan.changes.filter((change) => !isDaemonOwnedConfigKey(change.key));
     const putDaemonBack = async (): Promise<boolean> => {
       if (daemonOwned.length === 0 || !caller.method) return true;
-      try { await caller.method('config.setMany', { entries: daemonOwned.map((change) => ({ key: change.key, value: change.previous })) }); return true; } catch { return false; }
+      try {
+        const answer = await caller.method('config.setMany', { entries: daemonOwned.map((change) => ({ key: change.key, value: change.previous })) }) as Record<string, unknown> | undefined;
+        return answer?.code !== 'OWNER_APPROVAL_PENDING';
+      } catch { return false; }
     };
     if (daemonOwned.length > 0) {
       if (!caller.method) throw new CapabilityRefusal('This runs in the daemon, and no daemon took the request here; nothing was brought in.', undefined, 'UNAVAILABLE');
@@ -650,9 +653,13 @@ export const STARTUP_TRANSFER_IMPORT: Def = {
           else atomicWriteFileSync(entry.path, entry.previous, { mkdirp: true });
         } catch { notRestored.push(entry.path); }
       }
-      if (own.length > 0) config.setMany(own.map((change) => ({ key: change.key as ConfigKey, value: change.previous })), localOwnerActor());
+      const ownBack = own.length === 0 || config.setMany(own.map((change) => ({ key: change.key as ConfigKey, value: change.previous })), localOwnerActor()).ok;
       const back = await putDaemonBack();
-      throw new CapabilityRefusal(`Nothing was brought in: a file could not be written (${errorText(error)}). The settings were put back${back ? '' : ', except the daemon\'s'}${notRestored.length > 0 ? `; these files still hold the new contents: ${notRestored.join(', ')}` : ' and every file already replaced was put back'}.`);
+      const settingsSummary = ownBack && back ? 'The settings were put back'
+        : ownBack && !back ? 'The program\'s settings were put back, except the daemon\'s'
+          : !ownBack && back ? 'The daemon\'s settings were put back, except this program\'s'
+            : 'Neither the program\'s nor the daemon\'s settings could be put back';
+      throw new CapabilityRefusal(`Nothing was brought in: a file could not be written (${errorText(error)}). ${settingsSummary}${notRestored.length > 0 ? `; these files still hold the new contents: ${notRestored.join(', ')}` : ' and every file already replaced was put back'}.`);
     }
     return {
       text: [

@@ -181,6 +181,8 @@ function ownStartup(owner: object, label: StartupOwner, action: () => Promise<vo
 export class DaemonServer {
   private enabled = false;
   private server: ReturnType<typeof Bun.serve> | null = null;
+  private startingPromise: Promise<void | NativeHandover> | null = null;
+  private readonly bootRecoveryTasks = new Set<Promise<unknown>>();
   private port: number;
   private host: string;
   private acceptedTransportBinding: Pick<ResolvedDaemonFacadeRuntime, 'host' | 'port'> | null = null;
@@ -751,7 +753,14 @@ export class DaemonServer {
    * Start the daemon. Refuses to start if not explicitly enabled.
    */
   async start(): Promise<void | NativeHandover> {
-    return runInJudgmentRuntime(this.judgmentRuntime, () => this.startInJudgmentRuntime());
+    if (this.startingPromise) return this.startingPromise;
+    const run = runInJudgmentRuntime(this.judgmentRuntime, () => this.startInJudgmentRuntime());
+    this.startingPromise = run;
+    try {
+      return await run;
+    } finally {
+      if (this.startingPromise === run) this.startingPromise = null;
+    }
   }
 
   /** Runs `fn` (and the work it starts) as this daemon's, for judgment readings. */
@@ -950,20 +959,24 @@ export class DaemonServer {
         this.replySettlement = () => { for (const unsubscribe of unsubscribes) unsubscribe(); };
       }
       this.surfaceRegistry.syncConfiguredSurfaces();
+      const trackRecovery = (task: Promise<unknown>): void => {
+        this.bootRecoveryTasks.add(task);
+        void task.finally(() => { this.bootRecoveryTasks.delete(task); });
+      };
       // Work the owner agreed to before a restart and that never started starts now.
       if (!this.owedChannelRepliesResent) {
-        void this.workProposals.init().then(() => this.surfaceActionHelper.resumeAgreedWork()).then((resumed) => {
+        trackRecovery(this.workProposals.init().then(() => (this.tornDown ? 0 : this.surfaceActionHelper.resumeAgreedWork())).then((resumed) => {
           if (resumed > 0) logger.info('DaemonServer: agreed work saved before the restart was started', { resumed });
         }, (error: unknown) => {
           logger.error('DaemonServer: agreed work saved before the restart could not be started', { error: summarizeError(error) });
-        });
+        }));
       }
       // Channel answers whose send the previous process died in are sent now, once per process;
       // GitHub answers owed before the restart are posted (once) or reported.
       if (!this.owedChannelRepliesResent) {
         this.owedChannelRepliesResent = true;
         // Only a home that ever owed one has the log; starting opens nothing otherwise.
-        if (existsSync(daemonOperationsPath(this.configManager))) void recoverGitHubReplies({
+        if (existsSync(daemonOperationsPath(this.configManager))) trackRecovery(recoverGitHubReplies({
           operations: daemonOperationLog<GitHubReplyOperation>(this.configManager),
           awaitAgent: async (agentId) => { await this.agentManager.join(agentId); return this.agentManager.getStatus(agentId); },
           resolveToken: () => resolveGitHubToken(this.serviceRegistry),
@@ -971,12 +984,12 @@ export class DaemonServer {
           trySpawnAgent: (input, logLabel, sessionId) => this.trySpawnAgent(input, logLabel, sessionId),
         }).catch((error: unknown) => {
           logger.error('DaemonServer: GitHub answers owed before the restart could not be finished', { error: summarizeError(error) });
-        });
-        void this.surfaceDeliveryHelper.resendOwedChannelReplies().then((resent) => {
+        }));
+        trackRecovery((this.tornDown ? Promise.resolve(0) : this.surfaceDeliveryHelper.resendOwedChannelReplies()).then((resent) => {
           if (resent > 0) logger.info('DaemonServer: channel answers owed before the restart were sent again', { resent });
         }, (error: unknown) => {
           logger.error('DaemonServer: channel answers owed before the restart could not be sent again', { error: summarizeError(error) });
-        });
+        }));
       }
       if (this.configManager.get('watchers.enabled')) {
         // Each beat also compares the https certificate's renewal time with the clock (lan-https/secure-address.ts checkDue).
@@ -1057,6 +1070,13 @@ export class DaemonServer {
       this.surfaceDeliveryHelper.abandonPendingSurfaceReplies('the daemon failed to start before the reply was delivered');
       this.channelHealth.stop();
       this.automationManager.stop();
+      try { this.triggerManager?.shutdown(); } catch { /* best-effort startup rollback */ }
+      if (this.hostedSessions && this.hostedSessionsRestored) {
+        this.hostedSessionsRestored = false;
+        try { this.hostedSessions.dispose?.(); } catch { /* best-effort startup rollback */ }
+      }
+      try { this.sessionBroker.stop?.(); } catch { /* best-effort startup rollback */ }
+      try { this.distributedRuntime.endWaits(); } catch { /* best-effort startup rollback */ }
       // Retain the FIRST stop: the coordinator fences synchronously and later
       // stop calls may return before this admitted consumer drain finishes.
       void ownStartup(this, 'cluster rollback', () => this.clusterCoordinator.stop('daemon start failed')).catch(() => {});
@@ -1575,6 +1595,9 @@ export class DaemonServer {
     this.stopRelayRevocationWatch = null;
     this.relayCodeStore = null;
     await close(() => this.httpRouter.dispose(), 'the HTTP router');
+    if (this.bootRecoveryTasks.size > 0) {
+      await close(() => Promise.allSettled([...this.bootRecoveryTasks]).then(() => undefined), 'boot recovery tasks');
+    }
     this.controlPlaneHelper.dispose();
     this.unbindSharedToken?.();
     this.unbindSharedToken = null;

@@ -44,6 +44,7 @@ import { handleBrowserCommand } from './browser-command.ts';
 import { handlePluginBundlesCommand } from '@goodvibes/engine/terminal-shell/plugin-bundles-command';
 import { handleRelayCommand } from './relay-command.ts';
 import { handleFleetCommand } from './fleet-command.ts';
+import { DAEMON_STATE_SURFACE_ROOT } from '@goodvibes/engine/platform/platform/daemon/lifecycle-marker';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { withProviderServices, type OneShotProviderServices } from './one-shot-services.ts';
 import { dialHostForConfiguredHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
@@ -133,8 +134,8 @@ export function readAuthPaths(runtime: CliCommandRuntime) {
     workingDirectory: runtime.workingDirectory,
     homeDirectory: runtime.homeDirectory,
   });
-  const userStorePath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-users.json');
-  const bootstrapCredentialPath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-bootstrap.txt');
+  const userStorePath = shellPaths.resolveUserPath(DAEMON_STATE_SURFACE_ROOT, 'auth-users.json');
+  const bootstrapCredentialPath = shellPaths.resolveUserPath(DAEMON_STATE_SURFACE_ROOT, 'auth-bootstrap.txt');
   const operatorToken = readConnectedHostOperatorToken(runtime.homeDirectory, resolveConnectedHostAddress(runtime.configManager).baseUrl);
   return {
     userStorePath,

@@ -34,7 +34,6 @@ function shell() {
     sessionMemoryStore: new SessionMemoryStore(),
     begin: () => {},
     switchModels: () => {},
-    answerOptions: () => ({}),
     sendTurn: (text) => { turns.push(text); },
     notify: () => {},
     showShellOutput: () => {},

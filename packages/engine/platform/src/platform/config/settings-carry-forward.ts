@@ -20,9 +20,12 @@
  * a key from a newer version): it is left in the file and reported once
  * (manager-ingestion.ts), never rewritten here.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/index.js';
 import { collectDaemonOwnedEntries, persistDaemonKey, readDaemonTierFile, removeDaemonKey } from './daemon-config-tier.js';
 import { readDotPath } from './shared-config-tier.js';
 import { deleteRawDotPath } from './settings-io.js';
@@ -207,11 +210,28 @@ export function carriedListsPath(daemonTierPath: string): string {
   return join(dirname(daemonTierPath), 'carried-lists.json');
 }
 
+function readCarriedListsMarker(markerPath: string): Record<string, unknown> {
+  if (!existsSync(markerPath)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(markerPath, 'utf8'));
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch (error) {
+    logger.warn('settings-carry-forward: could not parse carried-lists marker; rebuilding', { markerPath, error: summarizeError(error) });
+    return {};
+  }
+}
+
+function writeCarriedListsMarker(markerPath: string, carried: Record<string, unknown>): void {
+  mkdirSync(dirname(markerPath), { recursive: true });
+  const temporary = `${markerPath}.tmp-${process.pid}-${randomUUID()}`;
+  writeFileSync(temporary, `${JSON.stringify(carried, null, 2)}\n`, { mode: 0o600 });
+  renameSync(temporary, markerPath);
+}
+
 function carryMergedLists(document: Record<string, unknown>, daemonTierPath: string): string[] {
   const merged: string[] = [];
   const markerPath = carriedListsPath(daemonTierPath);
-  let carried: Record<string, unknown> = {};
-  try { carried = JSON.parse(readFileSync(markerPath, 'utf8')) as Record<string, unknown>; } catch { carried = {}; }
+  let carried: Record<string, unknown> = readCarriedListsMarker(markerPath);
   let changed = false;
   for (const key of MERGED_DAEMON_LISTS) {
     const found = readDotPath(document, key);
@@ -231,10 +251,7 @@ function carryMergedLists(document: Record<string, unknown>, daemonTierPath: str
     carried = { ...carried, [key]: [...done, ...fresh] };
     changed = true;
   }
-  if (changed) {
-    mkdirSync(dirname(markerPath), { recursive: true });
-    writeFileSync(markerPath, `${JSON.stringify(carried, null, 2)}\n`, { mode: 0o600 });
-  }
+  if (changed) writeCarriedListsMarker(markerPath, carried);
   return merged;
 }
 
@@ -251,8 +268,7 @@ export const MERGED_DAEMON_RECORDS: readonly string[] = ['pricing.modelPrices'];
 function carryMergedRecords(document: Record<string, unknown>, daemonTierPath: string): string[] {
   const merged: string[] = [];
   const markerPath = carriedListsPath(daemonTierPath);
-  let carried: Record<string, unknown> = {};
-  try { carried = JSON.parse(readFileSync(markerPath, 'utf8')) as Record<string, unknown>; } catch { carried = {}; }
+  let carried: Record<string, unknown> = readCarriedListsMarker(markerPath);
   let changed = false;
   for (const key of MERGED_DAEMON_RECORDS) {
     const found = readDotPath(document, key);
@@ -274,10 +290,7 @@ function carryMergedRecords(document: Record<string, unknown>, daemonTierPath: s
     carried = { ...carried, [key]: [...done, ...fresh.map(([name]) => name)] };
     changed = true;
   }
-  if (changed) {
-    mkdirSync(dirname(markerPath), { recursive: true });
-    writeFileSync(markerPath, `${JSON.stringify(carried, null, 2)}\n`, { mode: 0o600 });
-  }
+  if (changed) writeCarriedListsMarker(markerPath, carried);
   return merged;
 }
 

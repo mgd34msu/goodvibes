@@ -259,18 +259,21 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
   const isDaemonRoot = (root: string): boolean => daemonRoot !== undefined && root === daemonRoot;
   // The holds of each workspace's checkpointing by its project's facilities (`pin`, let go by `release`).
   const pins = new Map<string, number>();
+  const closing = new Set<Promise<void>>();
   /** Closes a workspace's checkpointing that nothing holds and no session is bound to: the events that end its use. */
   const closeIfUnused = async (root: string): Promise<void> => {
     const open = workspaces.get(root);
     if (!open || (pins.get(root) ?? 0) > 0 || [...sessions.values()].includes(root)) return;
     workspaces.delete(root);
-    await open.close().catch((error: unknown) => {
+    const draining = open.close().catch((error: unknown) => {
       logger.warn('a workspace\'s checkpoints did not close cleanly', { workspaceRoot: root, error: error instanceof Error ? error.message : String(error) });
-    });
+    }).finally(() => { closing.delete(draining); });
+    closing.add(draining);
+    await draining;
   };
   // A conversation deleted (a web chat, a session: security/conversation-exposure.ts, cleared where each record is
   // deleted) is no longer bound to its workspace; a store only it kept open is closed.
-  onConversationCleared((key) => {
+  const stopClearedWatch = onConversationCleared((key) => {
     const sessionId = /^(?:companion-chat|session|conversation):(.+)$/.exec(key)?.[1];
     const root = sessionId === undefined ? undefined : sessions.get(sessionId);
     if (root === undefined) return;
@@ -403,11 +406,15 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
     },
     async close() {
       closed = true;
+      stopClearedWatch();
       const open = [...workspaces.values()];
       workspaces.clear();
-      await Promise.all(open.map((checkpointing) => checkpointing.close().catch((error: unknown) => {
-        logger.warn('hosted workspace checkpoints did not close cleanly', { workspaceRoot: checkpointing.manager.workspaceRoot, error: error instanceof Error ? error.message : String(error) });
-      })));
+      await Promise.all([
+        ...open.map((checkpointing) => checkpointing.close().catch((error: unknown) => {
+          logger.warn('hosted workspace checkpoints did not close cleanly', { workspaceRoot: checkpointing.manager.workspaceRoot, error: error instanceof Error ? error.message : String(error) });
+        })),
+        ...closing,
+      ]);
     },
   };
   byBus.set(runtimeBus, registry);

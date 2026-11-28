@@ -340,7 +340,7 @@ function policy(field: 'trust' | 'role'): CapabilityDefinition<McpCapabilityServ
       ? { id: 'mode', label: 'Trust', help: 'What happens to a call outside its limits', kind: 'choice', choices: MCP_TRUST_MODES, required: true, typed: { position: 2 } }
       : { id: 'role', label: 'Role', help: 'What kind of server it is', kind: 'choice', choices: MCP_ROLES, required: true, typed: { position: 2 } }],
     // The trust level in words in the answer (the value itself, "ask-on-risk", is the setting's, not a person's).
-    sentence: trust ? 'The trust level chosen is kept for {server} until you change it.' : '{server} will be treated as a {role} server until you change it.',
+    sentence: trust ? 'Sets {server}\'s trust level to {mode} until you change it.' : '{server} will be treated as a {role} server until you change it.',
     done: trust ? '' : '{server} is a {role} server.',
     touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: trust ? 'restore-trust' : 'restore-role',
     example: trust ? { server: 'github', mode: 'constrained' } : { server: 'github', role: 'git' },
@@ -375,11 +375,16 @@ export const MCP_FILES: CapabilityDefinition<McpCapabilityServices> = {
     const config = services.mcp.forProject(caller.workingDirectory);
     let effective: McpEffectiveConfig;
     try { effective = config.effective(); } catch (error) { refuse(`Reading the MCP config failed: ${summarizeError(error)}`); }
-    const held = new Set(await config.heldForTrust().catch(() => [] as readonly string[]));
+    let trustUnreadable: string | undefined;
+    const held = new Set(await config.heldForTrust().catch((error: unknown) => {
+      trustUnreadable = summarizeError(error);
+      return [] as readonly string[];
+    }));
     const servers = effective.servers.map((entry) => ({
       name: entry.server.name, endpoint: shownEndpoint(entry.server), scope: entry.source.scope, kind: entry.source.kind, path: entry.source.path,
       writable: entry.source.writable, trustMode: entry.server.trustMode ?? null, role: entry.server.role ?? null,
-      blocked: [...(entry.server.deniedTools ?? [])], exempt: [...(entry.server.allowedTools ?? [])], waitsForTrust: held.has(entry.server.name),
+      blocked: [...(entry.server.deniedTools ?? [])], exempt: [...(entry.server.allowedTools ?? [])],
+      waitsForTrust: trustUnreadable ? null : held.has(entry.server.name),
     }));
     return {
       text: [
@@ -387,8 +392,9 @@ export const MCP_FILES: CapabilityDefinition<McpCapabilityServices> = {
         ...effective.locations.map((location) => `  ${location.scope}/${location.kind}${location.writable ? '' : ' (read-only)'}  ${location.path}`),
         `Servers (${servers.length})`,
         ...servers.map((server) => `  ${server.name}: ${server.endpoint}  from ${server.scope}/${server.kind}${server.waitsForTrust ? ' (waits until this folder is trusted)' : ''}`),
+        ...(trustUnreadable ? [`Warning: folder trust could not be read (${trustUnreadable}); trust-wait status is unknown.`] : []),
       ].join('\n'),
-      data: { locations: effective.locations.map((location) => ({ ...location })), servers },
+      data: { locations: effective.locations.map((location) => ({ ...location })), servers, ...(trustUnreadable ? { trustUnreadable } : {}) },
     };
   },
 };

@@ -17,7 +17,8 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, normalize } from 'node:path';
-import { CapabilityRefusal, type CapabilityEntry } from './types.js';
+import { CapabilityRefusal } from './types.js';
+import type { CapabilityEntry } from './catalog.js';
 
 /**
  * The capabilities whose path names a place the daemon keeps using, not a file to read or write once (a workspace, a
@@ -26,7 +27,7 @@ import { CapabilityRefusal, type CapabilityEntry } from './types.js';
  * (path-inputs.ts), as a copy in a scratch folder would be a place that is gone after the call.
  */
 export const PLACE_PATH_CAPABILITIES: ReadonlySet<string> = new Set([
-  'workspaces.register', 'workspaces.unregister', 'devices.give-project', 'devices.take-project', 'agents.host', 'mcp.add',
+  'workspaces.register', 'workspaces.unregister', 'agents.host', 'mcp.add',
   'memory.add', 'memory.explain', 'skills.publish-local', 'plugin.publish-local',
 ]);
 

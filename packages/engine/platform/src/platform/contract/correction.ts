@@ -230,6 +230,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       if (item.mergeState === 'conflict') return { kind: 'conflict', branch: item.worktreeBranch ?? item.branch ?? unit.id, files: item.conflictFiles ?? [] };
       return null;
     };
+    if (run.abort.signal.aborted) return { kind: 'ended' };
     const outcome = await new Promise<Integration>((resolve) => {
       const unsubscribe = engine.on((event) => {
         if (!('itemId' in event) || event.itemId !== unit.id) return;

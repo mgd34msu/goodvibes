@@ -317,12 +317,22 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     outcome: { kind: 'enum', values: ['act', 'confirm', 'escalate'] },
     decisionId: { kind: 'string', optional: true },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_CANCELLED: {
     contractId: { kind: 'string' },
     reason: { kind: 'string' },
     filesModified: { kind: 'number' },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_CHECKED: {
     contractId: { kind: 'string' },
@@ -357,6 +367,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     claims: { kind: 'enum', values: ['files_verified', 'git_corroborated', 'unverifiable_no_claims', 'unverified', 'verified_empty'], optional: true },
     decisionIds: { kind: 'string[]' },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_COMMITTED: {
     contractId: { kind: 'string' },
@@ -364,6 +379,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     hash: { kind: 'string', optional: true },
     note: { kind: 'string' },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_CREATED: {
     contractId: { kind: 'string' },
@@ -373,6 +393,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     ownerAgentId: { kind: 'string' },
     gateProblems: { kind: 'string[]', optional: true },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_CRITERION_REGRESSED: {
     contractId: { kind: 'string' },
@@ -381,6 +406,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     metAtCheckId: { kind: 'string' },
     checkId: { kind: 'string' },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_ESCALATED: {
     contractId: { kind: 'string' },
@@ -391,6 +421,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     question: { kind: 'string' },
     unmetCriterionIds: { kind: 'string[]' },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_FAILED: {
     contractId: { kind: 'string' },
@@ -400,6 +435,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     turnLimit: { kind: 'number', optional: true },
     turnLimitSource: { kind: 'enum', values: ['default', 'policy-bound', 'spawn-override'], optional: true },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_FIX_PLANNED: {
     contractId: { kind: 'string' },
@@ -409,6 +449,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     unitIds: { kind: 'string[]' },
     round: { kind: 'number' },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_GATE_RESULT: {
     contractId: { kind: 'string' },
@@ -421,6 +466,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     required: { kind: 'boolean', optional: true },
     reason: { kind: 'string', optional: true },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_GROUP_STATUS_CHANGED: {
     contractId: { kind: 'string' },
@@ -428,6 +478,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     from: { kind: 'enum', values: ['awaiting-owner', 'blocked', 'cancelled', 'failed', 'fixing', 'judging', 'passed', 'pending', 'running'] },
     to: { kind: 'enum', values: ['awaiting-owner', 'blocked', 'cancelled', 'failed', 'fixing', 'judging', 'passed', 'pending', 'running'] },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_MERGE_CONFLICT: {
     contractId: { kind: 'string' },
@@ -436,6 +491,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     path: { kind: 'string' },
     files: { kind: 'string[]' },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_NUDGED: {
     contractId: { kind: 'string' },
@@ -447,6 +507,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     delivery: { kind: 'enum', values: ['bus', 'hold', 'wake'] },
     agentId: { kind: 'string' },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_NUDGE_CONSUMED: {
     contractId: { kind: 'string' },
@@ -455,6 +520,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     agentId: { kind: 'string' },
     turn: { kind: 'number', optional: true },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_OWNER_REPLIED: {
     contractId: { kind: 'string' },
@@ -463,6 +533,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     outcome: { kind: 'enum', values: ['act', 'confirm', 'escalate'] },
     action: { kind: 'enum', values: ['amended', 'approved', 'asked-again', 'refused', 'stopped'] },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_PASSED: {
     contractId: { kind: 'string' },
@@ -471,6 +546,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     excluded: { kind: 'number' },
     nudges: { kind: 'number' },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_PLANNED: {
     contractId: { kind: 'string' },
@@ -501,6 +581,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     ] },
     repair: { kind: 'number' },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_PLAN_CHECKED: {
     contractId: { kind: 'string' },
@@ -514,6 +599,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     ] },
     decisionIds: { kind: 'string[]' },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_SHAPED: {
     contractId: { kind: 'string' },
@@ -539,6 +629,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     ] },
     decisionIds: { kind: 'string[]' },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_SPAWN_GUARD_TRIGGERED: {
     contractId: { kind: 'string', optional: true },
@@ -547,6 +642,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     activeAgents: { kind: 'number' },
     reason: { kind: 'string' },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_STALLED: {
     contractId: { kind: 'string' },
@@ -557,20 +657,22 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     reason: { kind: 'string' },
     decisionId: { kind: 'string', optional: true },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_STATUS_CHANGED: {
     contractId: { kind: 'string' },
     from: { kind: 'enum', values: ['awaiting-owner', 'cancelled', 'checking-plan', 'committing', 'failed', 'fixing', 'judging', 'passed', 'planning', 'queued', 'running', 'shaping'] },
     to: { kind: 'enum', values: ['awaiting-owner', 'cancelled', 'checking-plan', 'committing', 'failed', 'fixing', 'judging', 'passed', 'planning', 'queued', 'running', 'shaping'] },
     occurrenceId: { kind: 'string', optional: true },
-  },
-  CONTRACT_UNIT_SILENT: {
-    contractId: { kind: 'string' },
-    unitId: { kind: 'string' },
-    agentId: { kind: 'string' },
-    silentMs: { kind: 'number' },
-    action: { kind: 'enum', values: ['failed', 'retried'] },
-    occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_UNIT_SPAWNED: {
     contractId: { kind: 'string' },
@@ -582,8 +684,13 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
       { key: 'reasoningEffort', kind: 'string', optional: true },
       { key: 'reason', kind: 'string' },
     ] },
-    purpose: { kind: 'enum', values: ['fresh-unit', 'resume', 'silence-retry', 'transport-retry', 'unit'] },
+    purpose: { kind: 'enum', values: ['fresh-unit', 'resume', 'transport-retry', 'unit'] },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_UNIT_STATUS_CHANGED: {
     contractId: { kind: 'string' },
@@ -593,11 +700,21 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     to: { kind: 'enum', values: ['awaiting-owner', 'blocked', 'cancelled', 'checking', 'failed', 'fixing', 'held', 'held-merge', 'nudged', 'passed', 'pending', 'running'] },
     agentId: { kind: 'string', optional: true },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTRACT_WAITING: {
     contractId: { kind: 'string' },
     reason: { kind: 'string' },
     occurrenceId: { kind: 'string', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   CONTROL_PLANE_AUTH_GRANTED: {
     clientId: { kind: 'string' },
@@ -826,9 +943,17 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     pageCount: { kind: 'number' },
   },
   LIST_CHANGED: {
-    list: { kind: 'enum', values: ['calendar', 'check-ins', 'checkpoints', 'ci-watches', 'dates', 'mail', 'memory', 'paired-devices', 'people', 'relay', 'tailscale', 'telegram-intake', 'voice'] },
+    list: { kind: 'enum', values: ['agent-homes', 'artifacts', 'calendar', 'capabilities', 'check-ins', 'checkpoints', 'ci-watches', 'code-index', 'context-windows', 'dates', 'documents', 'google', 'handed-off', 'hook-trace', 'machine-group', 'mail', 'memory', 'models', 'network-scan', 'notes', 'notifications', 'paired-devices', 'payments', 'people', 'personas', 'profile', 'relay', 'remote-runners', 'research', 'routines', 'safety', 'services', 'settings', 'settings-sync', 'setup', 'spending', 'system-updates', 'tailscale', 'telegram-intake', 'templates', 'tools', 'triggers', 'voice', 'work', 'workspaces', 'worktrees'] },
     change: { kind: 'enum', values: ['changed', 'created', 'deleted'] },
     id: { kind: 'string', optional: true },
+    project: { kind: 'string', optional: true },
+    sessionId: { kind: 'string', optional: true },
+    shared: { kind: 'boolean', optional: true },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   LLM_REQUEST_STARTED: {
     turnId: { kind: 'string' },
@@ -1466,6 +1591,7 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     stopReason: { kind: 'enum', values: ['context_overflow', 'hook_denied', 'preflight_failed', 'provider_error', 'provider_exhausted', 'tool_loop_circuit_breaker', 'unexpected_error'] },
     status: { kind: 'number', optional: true },
     code: { kind: 'string', optional: true },
+    providerCode: { kind: 'string', optional: true },
     attempts: { kind: 'number', optional: true },
     attemptTimes: { kind: 'array', optional: true },
     providerName: { kind: 'string', optional: true },
@@ -1510,49 +1636,53 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     watcherId: { kind: 'string' },
     sourceKind: { kind: 'enum', values: ['api', 'file', 'poll', 'stream', 'tail', 'webhook'] },
     checkpoint: { kind: 'string' },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   WATCHER_FAILED: {
     watcherId: { kind: 'string' },
     sourceKind: { kind: 'enum', values: ['api', 'file', 'poll', 'stream', 'tail', 'webhook'] },
     error: { kind: 'string' },
     retryable: { kind: 'boolean' },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   WATCHER_HEARTBEAT: {
     watcherId: { kind: 'string' },
     sourceKind: { kind: 'enum', values: ['api', 'file', 'poll', 'stream', 'tail', 'webhook'] },
     seenAt: { kind: 'number' },
     checkpoint: { kind: 'string' },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   WATCHER_STARTED: {
     watcherId: { kind: 'string' },
     sourceKind: { kind: 'enum', values: ['api', 'file', 'poll', 'stream', 'tail', 'webhook'] },
     name: { kind: 'string' },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   WATCHER_STOPPED: {
     watcherId: { kind: 'string' },
     sourceKind: { kind: 'enum', values: ['api', 'file', 'poll', 'stream', 'tail', 'webhook'] },
     reason: { kind: 'string' },
-  },
-  WORKSPACE_SWAP_COMPLETED: {
-    from: { kind: 'string' },
-    to: { kind: 'string' },
-    persistedInDaemonSettings: { kind: 'boolean' },
-  },
-  WORKSPACE_SWAP_FAILED: {
-    from: { kind: 'string' },
-    to: { kind: 'string' },
-    code: { kind: 'enum', values: ['INVALID_PATH', 'REROOT_FAILED', 'UNKNOWN'] },
-    reason: { kind: 'string' },
-  },
-  WORKSPACE_SWAP_REFUSED: {
-    from: { kind: 'string' },
-    to: { kind: 'string' },
-    reason: { kind: 'string' },
-    retryAfter: { kind: 'number' },
-  },
-  WORKSPACE_SWAP_STARTED: {
-    from: { kind: 'string' },
-    to: { kind: 'string' },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   WORK_PLAN_SNAPSHOT_INVALIDATED: {
     reason: { kind: 'string' },
@@ -1561,6 +1691,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     knowledgeSpaceId: { kind: 'string' },
     workPlanId: { kind: 'string' },
     revision: { kind: 'number' },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   WORK_PLAN_TASK_CREATED: {
     task: { kind: 'object', fields: [
@@ -1595,6 +1730,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     knowledgeSpaceId: { kind: 'string' },
     workPlanId: { kind: 'string' },
     revision: { kind: 'number' },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   WORK_PLAN_TASK_DELETED: {
     taskId: { kind: 'string' },
@@ -1630,6 +1770,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     knowledgeSpaceId: { kind: 'string' },
     workPlanId: { kind: 'string' },
     revision: { kind: 'number' },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   WORK_PLAN_TASK_STATUS_CHANGED: {
     taskId: { kind: 'string' },
@@ -1667,6 +1812,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     knowledgeSpaceId: { kind: 'string' },
     workPlanId: { kind: 'string' },
     revision: { kind: 'number' },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
   WORK_PLAN_TASK_UPDATED: {
     task: { kind: 'object', fields: [
@@ -1729,5 +1879,10 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     knowledgeSpaceId: { kind: 'string' },
     workPlanId: { kind: 'string' },
     revision: { kind: 'number' },
+    about: { kind: 'object', optional: true, fields: [
+      { key: 'project', kind: 'string|null' },
+      { key: 'kind', kind: 'enum', values: ['checkpoint', 'contract', 'watcher', 'work-plan', 'work-plan-task'] },
+      { key: 'id', kind: 'string' },
+    ] },
   },
 };

@@ -67,7 +67,7 @@ describe('first turn against a paired host', () => {
     expect(model.requests.some((request) => lastUserText(request).includes(PROMPT))).toBe(true);
     expect(screenText(answered)).toContain(PROMPT);
     expect(host!.judgments.requests.some((request) => JSON.stringify(request.state).includes(PROMPT))).toBe(true);
-    expect(host!.daemon.services.contractRunner.list({ includeTerminal: true })).toHaveLength(0);
+    expect(host!.daemon.services.contractRunner?.list({ includeTerminal: true }) ?? []).toHaveLength(0);
     expect(host!.daemon.services.agentManager.list()).toHaveLength(0);
     expect(agent!.alive()).toBe(true);
   });

@@ -86,7 +86,7 @@ export function wellFormedActor(actor: Actor | undefined): actor is Actor {
  * peer node or the program itself (`system`). Whatever its class (a sign-in under any username and role, a full or narrow
  * pairing, the operator token), the user is one person.
  */
-export function isTheUser(actor: Actor | undefined): actor is Actor {
+export function isTheUser(actor: Actor | undefined): boolean {
   if (!wellFormedActor(actor) || actor.agentFor !== undefined) return false;
   return actor.class !== 'guest' && actor.class !== 'peer' && actor.class !== 'system';
 }
@@ -159,8 +159,7 @@ export function mintsAgentCredential(caller: Pick<CallerFacts, 'actor' | 'creden
 }
 
 /** The words of a refused mint of the Agent's credential. */
-export const AGENT_CREDENTIAL_OWNER_ONLY_WORDS = 'The Agent\'s credential acts as the owner\'s model, so only the owner\'s own Agent '
-  + '(or the owner\'s own sign-in) has one made; this caller is not the owner in person. Nothing was made, and nothing was put to the owner.';
+export const AGENT_CREDENTIAL_OWNER_ONLY_WORDS = 'The Agent credential acts as a model, so only the user may mint one; nothing was made.';
 
 /**
  * The user on a signed-in session ({@link ownerHimself}: the web UI, under any username and role). Every request on it is
@@ -267,8 +266,7 @@ export function nestedAnswerAdmitted(upstream: { readonly covers?: ReadonlySet<s
 
 /** The code and words of an answer refused because its caller is not the owner answering. */
 export const OWNER_ANSWERS_ONLY = 'OWNER_ANSWERS_ONLY';
-export const OWNER_ANSWERS_ONLY_WORDS = 'Only the owner answers this, in person: in Waiting for you, in the terminal app, the Agent, '
-  + 'the web UI or a phone the owner paired. Nothing was answered, and nothing was put to the owner.';
+export const OWNER_ANSWERS_ONLY_WORDS = 'Only the user can answer this (not a model, guest, or peer). Nothing was answered.';
 
 /**
  * Whether this caller answers a question addressed to the owner: the user from any credential ({@link ownerHimself}), the
@@ -304,21 +302,16 @@ export const OWNER_ONLY_ACT = 'OWNER_ONLY_ACT';
 
 /** The one sentence of that refusal: what it was, that only the owner does it, and where the owner does it. */
 export function ownerOnlyActWords(what: string, where: string): string {
-  return `${what} is done only by the owner in person, in ${where}; this caller is not the owner. Nothing was done, and nothing was put to the owner.`;
+  return `${what} is restricted to the user (${where}); this caller is not authorized. Nothing was done.`;
 }
 
 /**
- * The code of an act a model never makes (the effect table's `model.refused`), refused in every mode: only the acts the
- * released v3.5.0 refused a model on the route a model had (an operator method), such as granting or withdrawing access,
- * a sign-in, a credential, a pairing and the permission rules. A model's call of anything else is decided by the five
- * permission modes.
+ * The code of an act a model never makes (the effect table's `model.refused`), refused in every mode.
  */
 export const MODEL_NEVER = 'MODEL_NEVER';
 /** Its one sentence. */
 export function modelNeverWords(what: string): string {
-  return `${what} is never done by a model, in any mode and in the owner's own turn too: a model never creates a sign-in, `
-    + 'changes a password, mints, carries out or widens a credential, pairs a device, gives or takes access, reads out a secret, '
-    + 'or changes the permission mode or rules. The owner does it in person. Nothing was done, and nothing was put to the owner.';
+  return `${what} cannot be done by a model: models never mint or export credentials or approve device pairing. Do it directly from the app or web UI.`;
 }
 
 /** The code a value-deciding handler answers with when the value is the owner's to decide for a caller not admitted. */

@@ -337,15 +337,14 @@ async function startWithTimeout(
     if (result === 'timed_out') {
       logger.warn(`${label} startup timed out; continuing without it in this host instance`, { timeoutMs });
       if (cleanup) {
-        void cleanup().catch((error) => {
-          logger.warn(`${label} cleanup after startup timeout failed`, { error: summarizeError(error) });
-        });
+        // Wait for the in-flight start to settle before running cleanup once, avoiding a race between
+        // startup and teardown and preventing duplicate cleanup invocations.
         void startPromise.then(
           async () => {
             try {
               await cleanup();
             } catch (error) {
-              logger.warn(`${label} delayed cleanup after startup timeout failed`, { error: summarizeError(error) });
+              logger.warn(`${label} cleanup after startup timeout failed`, { error: summarizeError(error) });
             }
           },
           (error) => {

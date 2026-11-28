@@ -12,7 +12,7 @@ import type { Actor } from '../../daemon/http-policy.js';
 /** The one refusal code for a caller that is not a current paired owner. */
 export const PAIRED_OWNER_REQUIRED = 'PAIRED_OWNER_REQUIRED';
 
-const PAIR_STEP = 'On the daemon\'s own machine the apps use the operator token they already hold over a direct loopback connection (not through a proxy or tunnel, and not while a public address such as controlPlane.publicBaseUrl is configured); in the web UI sign in as the owner; otherwise pair this device as yours from your own screen (in your signed-in web UI: Devices and network, Pair something, "Show the sign-in code once"; the Agent takes it with goodvibes-agent setup pair --with-code), then retry. A pairing someone else asked for and you approved is not your device and does no native work.';
+const PAIR_STEP = 'On the daemon\'s own machine the apps use the operator token over loopback; in the web UI sign in or pair this device from Devices and network, then retry.';
 
 function holds(scopes: readonly string[] | undefined, needed: readonly string[]): boolean {
   return scopes !== undefined && missingScopes(scopes, needed).length === 0;

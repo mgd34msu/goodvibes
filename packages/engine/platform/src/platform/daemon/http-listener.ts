@@ -148,6 +148,8 @@ const LISTENER_ROUTES: ReadonlySet<string> = new Set(['/login', '/logout', '/web
  * Rate limited to 60 requests/minute per IP by default.
  */
 export class HttpListener {
+  private stopEpoch = 0;
+  private starting: Promise<void> | null = null;
   private enabled = false;
   private server: ReturnType<typeof Bun.serve> | null = null;
   private port: number;
@@ -266,6 +268,19 @@ export class HttpListener {
    * Start listening. Refuses to start if not enabled.
    */
   async start(): Promise<void> {
+    if (this.starting !== null) {
+      return this.starting;
+    }
+    const run = this.startInternal();
+    this.starting = run;
+    try {
+      await run;
+    } finally {
+      if (this.starting === run) this.starting = null;
+    }
+  }
+
+  private async startInternal(): Promise<void> {
     if (!this.enabled) {
       logger.info('HTTP listener is disabled. Enable via danger.httpListener config.');
       return;
@@ -277,6 +292,7 @@ export class HttpListener {
       logger.info('HttpListener: already running');
       return;
     }
+    const startEpoch = this.stopEpoch;
     // With CORS enforced, refuse to bind beyond loopback with an empty allowlist,
     // judged on the current settings at every bind. Off by default: home and
     // single-user deployments do not need CORS enforcement. Decided from the
@@ -293,6 +309,9 @@ export class HttpListener {
     // Skip the OS port probe when the host injects a custom serve factory.
     if (this.serveFactory === Bun.serve) {
       await requirePortAvailable(this.port, this.host, 'HTTP listener');
+    }
+    if (this.restartCycle.closed || startEpoch !== this.stopEpoch) {
+      return;
     }
     const self = this;
     // Requests are the starting daemon's work (its judgment port), started from its start().
@@ -324,6 +343,7 @@ export class HttpListener {
    * call this synchronously before draining consumers, then await and stop.
    */
   fenceRestartAdmission(): void {
+    this.stopEpoch += 1;
     this.restartCycle.fence();
     this._configWatchUnsub?.();
     this._configWatchUnsub = null;
@@ -346,6 +366,7 @@ export class HttpListener {
    * Stop the listener.
    */
   async stop(): Promise<void> {
+    this.stopEpoch += 1;
     // Tear down config watcher only on intentional stop, not mid-restart.
     // During a restart cycle the watcher must stay active so
     // config changes that arrive between stop() and the subsequent start() can be

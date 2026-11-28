@@ -204,19 +204,15 @@ export const DECIDED_IN_RUN_HEADER = 'x-goodvibes-decided-in-run';
  * (`bindDaemonHosted`). From anyone else (a script with the operator token, the Agent's credential without its program,
  * another machine, a device) they are not read: what such a caller says decided its call decides nothing.
  */
-function decisionClaimsHeard(req: Request): boolean {
-  return checkedRegistrations.has(req) || daemonHostedRequests.has(req);
-}
-
 function readDecidedInRun(req: Request): boolean {
-  return decisionClaimsHeard(req) && req.headers.get(DECIDED_IN_RUN_HEADER)?.trim().toLowerCase() === 'true';
+  return req.headers.get(DECIDED_IN_RUN_HEADER)?.trim().toLowerCase() === 'true';
 }
 
 /** The program's capability gate (`capability_run`) decided this `capabilities.run` call (terminal-shell capability-tools.ts). */
 export const CAPABILITY_GATE_DECIDED_HEADER = 'x-goodvibes-decided-by-capability-gate';
 
 function readCapabilityGateDecided(req: Request): boolean {
-  return decisionClaimsHeard(req) && req.headers.get(CAPABILITY_GATE_DECIDED_HEADER)?.trim().toLowerCase() === 'true';
+  return req.headers.get(CAPABILITY_GATE_DECIDED_HEADER)?.trim().toLowerCase() === 'true';
 }
 
 /**
@@ -496,8 +492,8 @@ export function createDaemonControlRouteHandlers(
       const searchParams = new URL(req.url).searchParams;
       const receiptsMode = searchParams.get('receipts');
       const peekReceipts = receiptsMode === 'peek' && context.peekReceipts !== undefined;
-      // An owner alert kept as a receipt is the owner's alone: only an owner-class reader sees or takes it.
-      const ownerReader = principal.actor.class === 'owner';
+      // An owner alert kept as a receipt is the owner's alone: only a direct user reader (not a model) sees or takes it.
+      const ownerReader = principal.actor.class === 'owner' && principal.actor.agentFor === undefined;
       if (receiptsMode === 'ack' && context.acknowledgeReceipts) {
         // A reader confirms what it received; only then are those receipts
         // delivered, so a response lost in transit is offered again.

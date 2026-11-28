@@ -115,6 +115,13 @@ export function buildDaemonChannelHealthWatcher(
       return delivered || (!signal?.aborted && await ownerFallback());
     },
   });
-  owner?.ingressAlarm?.subscribe(() => watcher.requestSweep());
+  const unsubAlarm = owner?.ingressAlarm?.subscribe(() => watcher.requestSweep());
+  if (unsubAlarm) {
+    const originalStop = watcher.stop.bind(watcher);
+    watcher.stop = () => {
+      unsubAlarm();
+      originalStop();
+    };
+  }
   return watcher;
 }

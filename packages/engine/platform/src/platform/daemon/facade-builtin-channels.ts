@@ -101,7 +101,7 @@ export function createBuiltinChannelRuntime(
     surfaceDeliveryEnabled: options.surfaceDeliveryEnabled,
     // Surface-scoped, alongside the channel policy store: the Telegram poll
     // cursor is per-surface state and must not leak across surface roots.
-    telegramOffsetPath: runtime.runtimeServices.shellPaths.resolveProjectPath(
+    telegramOffsetPath: runtime.runtimeServices.shellPaths.resolveUserPath(
       'goodvibes', 'channels', 'telegram-offset.json',
     ),
     buildSurfaceAdapterContext: () => surfaceActionHelper.buildSurfaceAdapterContext(),

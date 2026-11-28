@@ -39,7 +39,7 @@ import { InputHistory } from '../terminal-shell/src/input-history.ts';
 import { getWrappedPromptInfo } from '../terminal-shell/src/prompt-buffer.ts';
 import { splitSlashCommand } from '../terminal-shell/src/slash-command-parser.ts';
 
-type Ctx = CommandRouteContext & { readonly print: (text: string) => void };
+type Ctx = CommandRouteContext & { readonly print: (text: string) => void; readonly invokedByModel?: boolean | undefined };
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

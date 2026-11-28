@@ -11,10 +11,11 @@
  * tried again at the next start; one that ran is recorded beside the store, by
  * the file it carried, with what it carried, and never runs again for it.
  */
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { KnowledgeStore } from './store.js';
+import { atomicWriteFileSync } from '../config/atomic-write.js';
 import { logger } from '../utils/logger.js';
 
 /** The record of the carries, beside the daemon's store. */
@@ -83,7 +84,7 @@ export async function carryAgentKnowledgeOnce(from: KnowledgeStore, to: Knowledg
     carriedAt: Date.now(), sources: newSources.length, extractions: newExtractions.length, entries: newNodes.length,
     links: newEdges.length, issues: newIssues.length, alreadyThere,
   };
-  writeFileSync(recordPathOf(to), `${JSON.stringify({ ...readAgentKnowledgeCarry(to), [key]: result }, null, 2)}\n`, 'utf-8');
+  atomicWriteFileSync(recordPathOf(to), `${JSON.stringify({ ...readAgentKnowledgeCarry(to), [key]: result }, null, 2)}\n`);
   return result;
 }
 
@@ -109,15 +110,30 @@ export function startAgentKnowledgeCarry(daemonAgentStore: KnowledgeStore, to: K
     if (readAgentKnowledgeCarry(to)[resolve(agentProgramFile)]) return;
     // Read from a copy: opening a store may bring its file up to this version's layout, and the Agent's file must stay
     // exactly as a 3.5.0 binary wrote it.
-    const copyDir = mkdtempSync(join(tmpdir(), 'goodvibes-agent-knowledge-'));
-    const copy = join(copyDir, basename(agentProgramFile));
-    for (const suffix of ['', '-wal', '-shm']) if (existsSync(`${agentProgramFile}${suffix}`)) copyFileSync(`${agentProgramFile}${suffix}`, `${copy}${suffix}`);
-    const program = KnowledgeStore.forFamily({ dbPath: copy, family: 'agent' });
+    let copyDir: string | undefined;
+    let program: KnowledgeStore | undefined;
     try {
+      copyDir = mkdtempSync(join(tmpdir(), 'goodvibes-agent-knowledge-'));
+      const copy = join(copyDir, basename(agentProgramFile));
+      for (const suffix of ['', '-wal', '-shm']) {
+        const source = `${agentProgramFile}${suffix}`;
+        if (!existsSync(source)) continue;
+        try {
+          copyFileSync(source, `${copy}${suffix}`);
+        } catch (error) {
+          if (suffix !== '' && (error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          throw error;
+        }
+      }
+      program = KnowledgeStore.forFamily({ dbPath: copy, family: 'agent' });
       await carry(program, 'The Agent\'s own knowledge', resolve(agentProgramFile));
+    } catch (error) {
+      logger.error('[knowledge] The Agent\'s own knowledge could not be copied for carry-forward; it is tried again at the next start', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     } finally {
-      await program.close().catch(() => undefined);
-      rmSync(copyDir, { recursive: true, force: true });
+      if (program) await program.close().catch(() => undefined);
+      if (copyDir) rmSync(copyDir, { recursive: true, force: true });
     }
   })();
 }

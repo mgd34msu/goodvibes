@@ -215,9 +215,15 @@ export function buildOperatorContract(catalog: GatewayMethodCatalog): OperatorCo
     },
     auth: {
       ...contract.auth,
+      login: {
+        ...contract.auth.login,
+        requestSchema: CONTROL_AUTH_LOGIN_REQUEST_SCHEMA,
+        responseSchema: CONTROL_AUTH_LOGIN_RESPONSE_SCHEMA,
+      },
       current: {
         ...contract.auth.current,
         aliasPaths: ['/api/control-plane/whoami'],
+        responseSchema: CONTROL_AUTH_CURRENT_RESPONSE_SCHEMA,
       },
     },
     operator: {

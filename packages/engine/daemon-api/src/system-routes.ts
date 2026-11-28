@@ -443,9 +443,11 @@ export function createDaemonSystemRouteHandlers(
       if (putToOwner) return putToOwner;
       const writeAdmin = context.requireAdmin(req);
       if (writeAdmin) return writeAdmin;
-      // One admission, one write per settings file, one revision and one change event per key,
-      // for the caller's own actor: the manager admits a loosening change for it again.
-      const writer = context.resolveAuthenticatedPrincipal?.(req)?.actor ?? systemActor('daemon-api');
+      // One admission, one write per settings file, one revision and one change event per key.
+      // ownerActResponse above already admitted any loosening change (via the active mode or user approval),
+      // so unwrap an agent actor to its principal before writing.
+      const rawWriter = context.resolveAuthenticatedPrincipal?.(req)?.actor ?? systemActor('daemon-api');
+      const writer = rawWriter.agentFor ?? rawWriter;
       const result = context.configManager.setMany(changes, writer, settingPress(req));
       if (!result.ok) {
         const { refusal } = result;

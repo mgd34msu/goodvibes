@@ -25,7 +25,7 @@ export function createNativeHostFetch(options: { readonly current: () => boolean
     const bearer = headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
     const target = input instanceof Request ? input.url : String(input);
     if (bearer) {
-      for (const [name, value] of Object.entries(await programCallHeadersFor(target, bearer, options.fetchImpl ?? fetch))) {
+      for (const [name, value] of Object.entries(await programCallHeadersFor(target, bearer, (options.fetchImpl ?? fetch) as typeof fetch))) {
         if (!headers.has(name)) headers.set(name, value);
       }
     }

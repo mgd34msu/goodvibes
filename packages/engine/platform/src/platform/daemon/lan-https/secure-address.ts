@@ -32,6 +32,7 @@
  * written, whom the group certificate was shared with) are kept in
  * `<control-plane dir>/secure-address.json`.
  */
+import { randomUUID } from 'node:crypto';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -226,6 +227,8 @@ export interface GroupFollower {
 
 export class SecureAddressService {
   private issuing: Promise<void> | null = null;
+  private syncingAddress: Promise<void> | null = null;
+  private disposed = false;
   private served: ServedCertificate | null = null;
   private ownStamp = '';
   private ownCheck: OwnCertificateCheck | null = null;
@@ -251,6 +254,12 @@ export class SecureAddressService {
   attachListener(resync: () => Promise<void>): void { this.resyncListener = resync; }
 
   attachGroup(link: SecureAddressGroupLink | null): void { this.group = link; }
+
+  /** Stop background certificate checks and suppress further listener resyncs after shutdown. */
+  dispose(): void {
+    this.disposed = true;
+    this.resyncListener = null;
+  }
 
   /** What the listener serves now (set by it after each sync). */
   noteServed(certificate: ServedCertificate | null): void { this.served = certificate; }
@@ -282,8 +291,9 @@ export class SecureAddressService {
     change(state);
     try {
       mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-      writeFileSync(`${path}.tmp`, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
-      renameSync(`${path}.tmp`, path);
+      const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
+      writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+      renameSync(tmp, path);
     } catch (error) {
       logger.warn('secure address: its state could not be saved', { error: summarizeError(error) });
     }
@@ -391,11 +401,14 @@ export class SecureAddressService {
   /** Record whom the group certificate in force was sent to, so a member's removal reissues it. */
   noteShared(groupId: string, generation: number, sharedWith: readonly string[]): void {
     void this.storedLetsEncrypt().then((stored) => {
+      if (this.disposed) return;
       const issuedAt = httpsCertificateSource(this.deps.config()) === 'lets-encrypt' ? stored?.issuedAt ?? 0 : 0;
       this.writeState((state) => {
         const before = state.groupShare && state.groupShare.issuedAt === issuedAt && state.groupShare.groupId === groupId ? state.groupShare.sharedWith : [];
         state.groupShare = { groupId, generation, issuedAt, sharedWith: [...new Set([...before, ...sharedWith])] };
       });
+    }).catch((error: unknown) => {
+      logger.warn('secure address: could not record group certificate share', { error: summarizeError(error) });
     });
   }
 
@@ -614,7 +627,17 @@ export class SecureAddressService {
    * address, when it differs from what was written; then look the name up
    * from this machine to catch a router that refuses local answers.
    */
-  private async syncAddressRecords(domain: string): Promise<void> {
+  private syncAddressRecords(domain: string): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    if (this.syncingAddress) return this.syncingAddress;
+    const run = this.syncAddressRecordsNow(domain).finally(() => {
+      if (this.syncingAddress === run) this.syncingAddress = null;
+    });
+    this.syncingAddress = run;
+    return run;
+  }
+
+  private async syncAddressRecordsNow(domain: string): Promise<void> {
     const address = primaryLanAddress();
     if (!address) { this.addressProblem = 'This computer has no private network address (192.168.x.x, 10.x.x.x or 172.16-31.x.x) to point the name at.'; return; }
     const wanted: Record<string, string> = { [domain]: address };
@@ -659,6 +682,7 @@ export class SecureAddressService {
    * in the background and syncs the listener again when it lands.
    */
   checkDue(): void {
+    if (this.disposed) return;
     const served = this.served;
     const now = this.now();
     if (this.dueCheckRunning || served === null || served.from !== 'this-machine') return;

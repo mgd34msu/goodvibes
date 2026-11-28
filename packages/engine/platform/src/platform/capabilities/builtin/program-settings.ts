@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { readCallerJson } from '../path-inputs.js';
 import { dirname } from 'node:path';
 import type { ConfigManager } from '../../config/manager.js';
+import { isDaemonOwnedConfigKey } from '../../config/config-ownership.js';
 import type { ConfigKey } from '../../config/schema.js';
 import { CONFIG_KEYS } from '../../config/schema.js';
 import { configKeyFacts } from '../../config/config-key-facts.js';
@@ -34,6 +35,8 @@ export interface ProgramSettingsCapabilityServices {
   readonly programSettings: {
     /** The asking program's settings (`tui` when no program said), with its project's layer. */
     config(caller: CapabilityCaller): ConfigManager;
+    /** The live daemon's ConfigManager, used for daemon-owned settings and keeping in-memory daemon state synced. */
+    readonly daemonConfig?: (Pick<ConfigManager, 'setDynamic'> & Partial<Pick<ConfigManager, 'load'>>) | undefined;
     /** The asking program's presets folder. */
     presets(caller: CapabilityCaller): ProfileManager;
     /** A file path the caller gave, in its own project folder when it is not absolute. */
@@ -215,13 +218,16 @@ function managedApplyKeys(changes: readonly ManagedBundleChange[], requested: re
 }
 
 /** Apply the keys of one stage this run takes; nothing is applied (the stage stays) when every one is held back. */
-async function applyManagedStage(config: ConfigManager, stage: { readonly id: string; readonly changes: readonly ManagedBundleChange[] }, values: ActionValues, intro: string, extra: readonly string[]): Promise<CapabilityResult> {
+async function applyManagedStage(config: ConfigManager, stage: { readonly id: string; readonly changes: readonly ManagedBundleChange[] }, values: ActionValues, intro: string, extra: readonly string[], daemonConfig?: Pick<ConfigManager, 'setDynamic'> & Partial<Pick<ConfigManager, 'load'>>): Promise<CapabilityResult> {
   const taken = managedApplyKeys(stage.changes, keysOf(values.keys), bringsSecurity(values));
   const held = heldBackLines(taken.heldBack, 'apply again choosing to bring them in too; they stay staged');
   if (taken.keys.length === 0) {
     return { text: [`${intro}: nothing applied${taken.heldBack.length > 0 ? '' : ' (no setting in it differs)'}.`, ...held, ...extra].join('\n'), data: { applied: 0, heldBack: taken.heldBack.map((entry) => entry.key) } };
   }
   const result = await applyStagedManagedBundle(config, taken.keys, stage.id);
+  if (daemonConfig && daemonConfig !== config && taken.keys.some((key) => isDaemonOwnedConfigKey(key))) {
+    try { daemonConfig.load?.(); } catch { /* daemon tier already written; next load reconciles */ }
+  }
   return {
     text: [`${intro}: ${result.appliedCount} change(s)${result.remainingCount > 0 ? `, ${result.remainingCount} still staged` : ''}.`, ...securityLines(taken.applied), ...held, ...extra].join('\n'),
     data: { rollback: result.rollbackToken, applied: result.appliedCount, remaining: result.remainingCount, heldBack: taken.heldBack.map((entry) => entry.key) },
@@ -239,7 +245,8 @@ export const MANAGED_APPLY = change({
       // One read: what is staged is what is applied, and only the stage this call made.
       const stage = await stageManagedSettingsBundle(config, bundle, path);
       return await applyManagedStage(config, stage, values, `Applied the managed bundle from ${path} (risk ${stage.risk})`,
-        stage.ignoredKeys && stage.ignoredKeys.length > 0 ? [`Not applied, not settings this version manages: ${stage.ignoredKeys.join(', ')}.`] : []);
+        stage.ignoredKeys && stage.ignoredKeys.length > 0 ? [`Not applied, not settings this version manages: ${stage.ignoredKeys.join(', ')}.`] : [],
+        services.daemonConfig);
     } catch (error) {
       recordSettingsSyncFailure('managed', errorText(error), config.getControlPlaneConfigDir());
       throw new CapabilityRefusal(`Not applied: ${errorText(error)}.`);
@@ -255,7 +262,7 @@ export const MANAGED_APPLY_STAGED = change({
     if (!staged) throw new CapabilityRefusal('Nothing is staged; nothing was applied.', 'Stage a bundle first.');
     try {
       // The stage shown is the one applied: another stage put there since is refused.
-      return await applyManagedStage(config, staged, values, 'Applied the staged settings', []);
+      return await applyManagedStage(config, staged, values, 'Applied the staged settings', [], services.daemonConfig);
     } catch (error) {
       recordSettingsSyncFailure('managed', errorText(error), config.getControlPlaneConfigDir());
       throw new CapabilityRefusal(`Not applied: ${errorText(error)}.`);
@@ -286,6 +293,9 @@ export const MANAGED_ROLLBACK = change({
     }
     try {
       const restored = rollbackManagedApply(config, values.token!);
+      if (services.daemonConfig && services.daemonConfig !== config) {
+        try { services.daemonConfig.load?.(); } catch { /* daemon tier already written; next load reconciles */ }
+      }
       return { text: `Put back ${restored} setting(s) to their values from before that apply.`, data: { restored } };
     } catch (error) {
       recordSettingsSyncFailure('managed', errorText(error), config.getControlPlaneConfigDir());
@@ -365,12 +375,17 @@ export const PRESETS_LOAD = change({
     }
     // One rule for every import of settings: what loosens a protection is held back unless chosen (incoming-settings.ts).
     const split = splitIncomingSettings((key: ConfigKey) => config.get(key), incoming, bringsSecurity(values));
+    const failedDetails: string[] = [];
     for (const change of split.apply) {
-      try { config.setDynamic(change.key, change.next); applied.push(change.key); } catch { failed.push(change.key); }
+      const target = isDaemonOwnedConfigKey(change.key) && services.daemonConfig ? services.daemonConfig : config;
+      try { target.setDynamic(change.key, change.next); applied.push(change.key); } catch (error) {
+        failed.push(change.key);
+        failedDetails.push(`${change.key}: ${errorText(error)}`);
+      }
     }
-    if (applied.length === 0 && failed.length > 0) throw new CapabilityRefusal(`Preset ${values.preset} was not loaded: these settings were refused: ${failed.join(', ')}.`);
+    if (applied.length === 0 && failed.length > 0) throw new CapabilityRefusal(`Preset ${values.preset} was not loaded: ${failedDetails.join('; ')}.`);
     return {
-      text: [`Loaded preset ${values.preset}: ${applied.length} setting(s).`, ...(failed.length > 0 ? [`Not taken: ${failed.join(', ')}.`] : []), ...(skipped.length > 0 ? [`Not taken from a preset by this version: ${skipped.join(', ')}.`] : []),
+      text: [`Loaded preset ${values.preset}: ${applied.length} setting(s).`, ...(failedDetails.length > 0 ? [`Not taken: ${failedDetails.join('; ')}.`] : []), ...(skipped.length > 0 ? [`Not taken from a preset by this version: ${skipped.join(', ')}.`] : []),
         ...heldBackLines(split.heldBack, 'load the preset again choosing to load them too')].join('\n'),
       data: { preset: values.preset, applied, failed, skipped, heldBack: split.heldBack.map((change) => change.key) },
     };

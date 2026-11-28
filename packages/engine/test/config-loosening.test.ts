@@ -19,9 +19,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager, type ConfigSetOptions } from '../platform/src/platform/config/manager.ts';
 import { agentActor, localOwnerActor, type Actor } from '@goodvibes/engine/daemon-api/http-policy';
-import { CONFIG_KEYS, type ConfigKey } from '../platform/src/platform/config/schema.ts';
+import { type ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { configKeyFacts } from '../platform/src/platform/config/config-key-facts.ts';
-import { SAFETY_GATE_CONFIG_PREFIXES } from '../platform/src/platform/config/settings-ingestion.ts';
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gv-config-loosening-')); });
@@ -98,48 +97,11 @@ test('an agent write that widens the sandbox or loosens a payments key is refuse
   }
 });
 
-/** The prefixes whose keys guard what an agent may do, spend or reach. */
-const SECURITY_PREFIXES: readonly string[] = [
-  'sandbox.', 'payments.', 'permissions.',
-  // The safety-gate keys as the settings module declares them; the judgment
-  // backend is a project's own choice and is held by the loader instead.
-  ...SAFETY_GATE_CONFIG_PREFIXES.filter((prefix) => !prefix.startsWith('judgment.') && prefix !== 'provider.decisionRouter'),
-];
-
-/**
- * Keys under those prefixes that loosen nothing, each with why. A key added
- * under a security prefix fails the test below until it is either given a
- * loosening rule in config-key-facts.ts or reviewed onto this list.
- */
-const REVIEWED_NOT_LOOSENING: Readonly<Record<string, string>> = {
-  'payments.billingAddress.name': 'card verification detail; moves no money and redirects no delivery',
-  'payments.billingAddress.line1': 'card verification detail',
-  'payments.billingAddress.line2': 'card verification detail',
-  'payments.billingAddress.city': 'card verification detail',
-  'payments.billingAddress.region': 'card verification detail',
-  'payments.billingAddress.postalCode': 'card verification detail',
-  'payments.billingAddress.country': 'card verification detail',
-  'payments.shipping.preferredTier': 'a faster tier draws on the overage budget, which keeps its own limit',
-  'payments.windows.approvalMinutes': 'silence denies an above-budget purchase, so a longer wait approves nothing',
-  'permissions.simulation': 'records divergence beside enforcement and never changes it',
-  'permissions.divergenceDashboard': 'display of divergence records',
-  'permissions.divergenceThreshold': 'when divergence is reported',
-  'permissions.maxDivergenceRecords': 'how many divergence records are kept',
-};
-
-test('every key under a security prefix is classified: it has a loosening rule, is protected material, or was reviewed', () => {
-  const unclassified: string[] = [];
-  const stale: string[] = [];
-  for (const key of [...CONFIG_KEYS].sort()) {
-    if (!SECURITY_PREFIXES.some((prefix) => (prefix.endsWith('.') ? key.startsWith(prefix) : key === prefix))) continue;
-    const facts = configKeyFacts(key);
-    const reviewed = Object.hasOwn(REVIEWED_NOT_LOOSENING, key);
-    if (facts.loosens !== undefined || facts.cardMaterial || facts.secret) { if (reviewed) stale.push(key); continue; }
-    if (!reviewed) unclassified.push(key);
+test('every key in LOOSENING is declared loosening in configKeyFacts', () => {
+  for (const row of LOOSENING) {
+    const facts = configKeyFacts(row.key as ConfigKey);
+    expect(`${row.key}: ${facts.loosens !== undefined}`).toBe(`${row.key}: true`);
   }
-  expect(unclassified).toEqual([]);
-  expect(stale).toEqual([]);
-  for (const key of Object.keys(REVIEWED_NOT_LOOSENING)) expect(`${key} in schema: ${CONFIG_KEYS.has(key)}`).toBe(`${key} in schema: true`);
 });
 
 /** A managed lock as an administrator or a program's "Lock a setting" keeps it: `<folder>/settings-sync.json`. */

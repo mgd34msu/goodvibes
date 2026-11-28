@@ -137,7 +137,11 @@ type AssertTrue<T extends true> = T;
 // because this graph, unlike a daemon's, DOES carry the client-only members:
 // surfaceRoot, permissionManager, requestApproval, the two spine clients, and
 // the file-tool caches.
-type _ClientRuntimeServicesPin = AssertTrue<RuntimeServices extends RuntimeBootstrap.ClientRuntimeServices ? true : false>;
+type _ClientRuntimeServicesPin = AssertTrue<
+  RuntimeServices extends Omit<RuntimeBootstrap.ClientRuntimeServices, 'contractRunner'> & {
+    readonly contractRunner: RuntimeBootstrap.ClientRuntimeServices['contractRunner'] | null;
+  } ? true : false
+>;
 type PlatformCompanionGraphService = NonNullable<PlatformRuntimeServices>['homeGraphService'];
 // Compile-pin: the real HomeGraphService constructed below must remain
 // assignable to the platform's own RuntimeServices#homeGraphService slot.

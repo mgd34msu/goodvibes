@@ -81,7 +81,7 @@ export function renderGoodVibesHelp(binary = 'goodvibes'): string {
     '      --output-format <format>   Alias for --output',
     '      --json                     Alias for --output-format json',
     '      --just-vibes               Work without interrupting you; anything that needs you is held for the end',
-    '      --yolo                     Run every action without safety denials for this launch',
+    '      --yolo                     Run actions without asking for this launch (sandbox, secrets, payment limits, and channel/hook guards still apply)',
     '      --no-alt-screen            Keep output in normal terminal scrollback',
     '      --port <port>              Port for server/web commands',
     '      --hostname <host>          Hostname for server/web commands (--host is an alias)',

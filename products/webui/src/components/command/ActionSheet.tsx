@@ -194,9 +194,8 @@ export function Blank({ action, input, values, onChange, onLabel, current }: {
     // The chosen answer's sentence under the list, as each radio answer carries its own.
     const chosenHelp = choices.find((choice) => choice.value === value)?.help;
     return (
-      <Field label={input.label} help={help}>
+      <Field label={input.label} help={chosenHelp ? (help ? `${help} ${chosenHelp}` : chosenHelp) : help}>
         <Select aria-label={input.label} value={value} onChange={onChange} options={[...usual, ...choices.filter((choice) => sessionOnly(action, input, choice.value) === undefined).map((choice) => ({ value: choice.value, label: choice.label }))]} />
-        {chosenHelp ? <p className="gv-action-sheet__hint">{chosenHelp}</p> : null}
       </Field>
     );
   }

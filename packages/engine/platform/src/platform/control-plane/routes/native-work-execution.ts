@@ -7,6 +7,7 @@ import { nativeWorkExecutionRequestSchema, nativeWorkExecutionSnapshotSchema, NA
 import { GatewayVerbError, withholdCommittedResult } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import { requireNativeOwner } from './native-owner.js';
+import { isTheUser } from '../../daemon/method-owner-decision.js';
 import type { WorkCause } from '../../workflow/work-ledger/work-plans.js';
 
 const SCOPES = ['read:work-ledger', 'write:fleet'] as const;
@@ -24,7 +25,7 @@ function authorize(invocation: GatewayMethodInvocation) {
  * that started it besides).
  */
 function actsOnOwnWork(invocation: GatewayMethodInvocation, causeOf: ((workId: string) => WorkCause) | undefined, workId: string, operation: 'start' | 'cancel' | 'resume'): void {
-  if (invocation.context.admin === true) return;
+  if (invocation.context.admin === true || isTheUser(invocation.context.actor)) return;
   const cause = causeOf?.(workId);
   if (cause?.madeFor !== undefined && cause.madeFor === invocation.context.principalId) return;
   const what = operation === 'start' ? 'started' : operation === 'cancel' ? 'stopped' : 'resumed';

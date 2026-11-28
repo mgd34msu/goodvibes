@@ -48,6 +48,10 @@
           "lasts": "not-a-change",
           "risk": "loosens-a-protection",
           "riskWords": "loosens a protection",
+          "ownerOnly": {
+            "reason": "hosting a coding agent starts an external agent outside GoodVibes' permission gate",
+            "instead": "Ask the owner to host it in Work and agents, Coding agents."
+          },
           "operator": {
             "method": "capabilities.run",
             "fields": {
@@ -667,50 +671,9 @@
     {
       "name": "changes",
       "title": "Code and changes",
-      "summary": "Opens Code and changes, or the Changes view on the staged, unstaged or all changes",
+      "summary": "Opens Code and changes: changed files, git, worktrees and code lookups",
       "group": "Conversation",
-      "actions": [
-        {
-          "id": "changes",
-          "label": "See changed files and their diff",
-          "word": "",
-          "line": "/changes <which changes>",
-          "sentence": "Opens the Changes view with the changed files and their diff.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It is a terminal screen."
-          },
-          "inputs": [
-            {
-              "id": "source",
-              "label": "Which changes",
-              "help": "The repository's changes to show",
-              "kind": "choice",
-              "choices": [
-                {
-                  "value": "staged",
-                  "label": "Staged"
-                },
-                {
-                  "value": "working",
-                  "label": "Not staged yet"
-                },
-                {
-                  "value": "head",
-                  "label": "Everything since the last commit"
-                }
-              ],
-              "required": true,
-              "typed": {
-                "position": 1
-              }
-            }
-          ]
-        }
-      ]
+      "actions": []
     },
     {
       "name": "checkpoint",
@@ -1111,8 +1074,7 @@
           "done": "Added {name}.",
           "touches": "this-machine",
           "lasts": "kept",
-          "risk": "loosens-a-protection",
-          "riskWords": "loosens a protection",
+          "risk": "none",
           "undoneBy": "remove-server",
           "operator": {
             "method": "capabilities.run",
@@ -1212,8 +1174,8 @@
               "choices": [
                 {
                   "value": "ask-on-risk",
-                  "label": "Decide calls outside its limits by my mode",
-                  "help": "Calls inside its folders and sites go on as your permission mode allows; a call outside them is one of your own decisions, made under your permission mode (YOLO runs it, Jev decides gives it to Jev, Ask me asks you). A server kept with no level set has this one.",
+                  "label": "Act inside its limits without asking",
+                  "help": "Calls inside its folders and sites go on as your permission mode allows; a call outside them is put to you, in every mode (YOLO too), and held for the end of the run in Just vibes. A server kept with no level set has this one.",
                   "risk": "loosens-a-protection"
                 },
                 {
@@ -1731,7 +1693,7 @@
           "label": "Set a server's trust level",
           "word": "trust",
           "line": "/mcp trust <server> <trust>",
-          "sentence": "The trust level chosen is kept for {server} until you change it.",
+          "sentence": "Sets {server}'s trust level to {mode} until you change it.",
           "done": "",
           "touches": "this-machine",
           "lasts": "kept",
@@ -1767,8 +1729,8 @@
               "choices": [
                 {
                   "value": "ask-on-risk",
-                  "label": "Decide calls outside its limits by my mode",
-                  "help": "Calls inside its folders and sites go on as your permission mode allows; a call outside them is one of your own decisions, made under your permission mode (YOLO runs it, Jev decides gives it to Jev, Ask me asks you). A server kept with no level set has this one.",
+                  "label": "Act inside its limits without asking",
+                  "help": "Calls inside its folders and sites go on as your permission mode allows; a call outside them is put to you, in every mode (YOLO too), and held for the end of the run in Just vibes. A server kept with no level set has this one.",
                   "risk": "loosens-a-protection"
                 },
                 {
@@ -5609,7 +5571,7 @@
           "label": "Propose a piece of work with its plan",
           "word": "propose",
           "line": "/work propose [--done-when <done when>] [--steps <plan>] <what you want done...>",
-          "sentence": "Proposes the work \"{goal}\" with its plan of steps for you to approve: it waits in Work, where you can change, move, take out or rewrite a step, approve it (that starts the work) or throw it away. Nothing runs until you approve.",
+          "sentence": "Proposes the work \"{goal}\" (done when: {criteria}; plan: {steps}) for you to approve: it waits in Work, where you can change, move, take out or rewrite a step, approve it (that starts the work) or throw it away. Nothing runs until you approve.",
           "done": "",
           "touches": "reads",
           "lasts": "not-a-change",

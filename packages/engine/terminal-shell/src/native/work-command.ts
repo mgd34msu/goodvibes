@@ -305,7 +305,7 @@ function onIntake(definition: CapabilityDefinition<WorkIntakeCapabilityServices>
 }
 
 /** A Work capability that runs on the daemon: through `capabilities.run`, as the person's own request. */
-function onDaemon(definition: CapabilityDefinition<unknown>): WorkAction {
+function onDaemon<S>(definition: CapabilityDefinition<S>): WorkAction {
   return daemonCapabilityAction<CommandActionContext>(definition as CapabilityDefinition<never>, {
     daemon: (ctx) => { if (!binding) throw commandRefusal('Work is not available in this session.'); return binding.daemon(ctx); },
     caller: (ctx) => binding?.caller(ctx) ?? {},
@@ -337,9 +337,9 @@ export const WORK_COMMAND: CommandDescription<CommandActionContext> = {
   group: 'Agents and work',
   firstScreenRows: [
     'list', 'new', 'request',
-    { label: 'Start, check, stop or resume work…', actions: ['start', 'status', 'cancel', 'resume'] },
+    { label: 'Start, check, stop or resume work…', actions: ['start', 'status', 'cancel', 'resume', 'branch-merge', 'branch-discard'] },
     { label: 'Answer it, run a failed step again or go on without it, its spending limit…', actions: ['answer', 'retry', 'go-on-without', 'budget'] },
-    { label: 'A plan waiting for you…', actions: ['approve', 'step-edit', 'step-drop', 'step-move', 'plan-redo', 'plan-discard'] },
+    { label: 'A plan waiting for you…', actions: ['propose', 'approve', 'step-edit', 'step-drop', 'step-move', 'plan-redo', 'plan-discard'] },
     { label: 'Tasks running in the background…', actions: TASKS_CAPABILITIES.map((definition) => definition.actionId) },
     { label: 'Work you asked for that has no answer…', actions: ['submission', 'submission-retry', 'submission-discard'] },
     { label: 'A message that has no answer…', actions: ['intake', 'intake-retry', 'intake-resume', 'intake-cancel'] },

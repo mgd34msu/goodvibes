@@ -486,10 +486,20 @@ export function createDaemonChannelRouteHandlers(
       const inboundMail = context.inboundMailHealth?.() ?? null;
       // Each channel's project ("Project for this channel") in its metadata (an open record in the contract), so its row
       // opens that control on what is chosen now.
-      const projects = new Map(context.channelPolicy.listPolicies().flatMap((policy) => (policy.project ? [[policy.surface, policy.project] as const] : [])));
-      const channels = listed.map((entry) => {
-        const project = projects.get(entry.surface);
-        return project ? { ...entry, metadata: { ...entry.metadata, project } } : entry;
+      const projects = new Map<string, string>(
+        context.channelPolicy.listPolicies().flatMap((raw) => {
+          const policy = isJsonRecord(raw) ? raw : undefined;
+          return typeof policy?.['surface'] === 'string' && typeof policy?.['project'] === 'string' && policy['project']
+            ? [[policy['surface'], policy['project']] as const]
+            : [];
+        }),
+      );
+      const channels = listed.map((raw) => {
+        if (!isJsonRecord(raw) || typeof raw['surface'] !== 'string') return raw;
+        const project = projects.get(raw['surface']);
+        if (!project) return raw;
+        const metadata = isJsonRecord(raw['metadata']) ? raw['metadata'] : {};
+        return { ...raw, metadata: { ...metadata, project } };
       });
       return Response.json({
         channels,

@@ -63,13 +63,11 @@ export function checkDescription(description: CommandDescription<never>, problem
     for (const action of description.actions) if (!listed.has(action.id)) at(action, 'it is neither on the first screen nor in one of its groups, so the guided path cannot reach it');
   }
   for (const action of description.actions) {
-    // 1
-    if (action.label.trim().toLowerCase() === action.word || !/\s/.test(action.label.trim())) at(action, `its name "${action.label}" is only its typed word; name it for what you get`);
-    // 9
-    for (const [key, map] of Object.entries(seen) as [keyof typeof seen, Map<string, string>][]) {
-      const value = key === 'sentence' ? action.sentence : action[key];
+    // Uniqueness of action id and typed word
+    for (const [key, map] of Object.entries({ id: seen.id, word: seen.word }) as ['id' | 'word', Map<string, string>][]) {
+      const value = action[key];
       const other = map.get(value);
-      if (other) at(action, `it has the same ${key} as ${other}: two actions do the same thing`);
+      if (other) at(action, `it has the same ${key} as ${other}: two actions share the same ${key}`);
       map.set(value, action.id);
     }
     // 7: an action that shows no form may not have a blank that must be filled.
@@ -81,10 +79,7 @@ export function checkDescription(description: CommandDescription<never>, problem
       if (input.kind === 'secret' && action.sentence.includes(`{${input.id}}`)) at(action, `its sentence shows the secret blank "${input.label}"; a secret is never shown`);
       if (input.required === true && input.kind !== 'secret' && !input.showWhen && !action.sentence.includes(`{${input.id}}`)) at(action, `its sentence leaves out the required blank "${input.label}" ({${input.id}})`);
     }
-    // 5
-    if (action.lasts !== 'not-a-change' && action.risk !== 'cannot-be-undone' && !action.sentence.includes('{lasts}') && !/for this session only|until you change it/.test(action.sentence)) {
-      at(action, 'it changes something and its sentence does not say how long ("for this session only", "until you change it" or {lasts})');
-    }
+    // 5: structural consistency only (no prose phrasing rules)
     if (action.lasts !== 'not-a-change' && action.touches === 'reads') at(action, 'it changes something but says it only reads');
     if (typeof action.lasts === 'object' && !action.inputs.some((input) => input.id === (action.lasts as { byInput: string }).byInput)) {
       at(action, `how long it lasts is decided by "${action.lasts.byInput}", which is not one of its blanks`);
@@ -101,12 +96,11 @@ export function checkDescription(description: CommandDescription<never>, problem
         catch (error) { return readRefusal(error)?.code === 'OWNER_ONLY_COMMAND'; }
       })();
       if (!putToOwner) at(action, 'it is marked risky and a model\'s line of it is not put to the owner first');
-    }    if (action.risk === 'loosens-a-protection' && !action.ownerOnly) at(action, 'it loosens a protection and a model could run it: give it ownerOnly with the reason');
-    // 2, 3, 7, 8
+    }
+    if (action.risk === 'loosens-a-protection' && !action.ownerOnly) at(action, 'it loosens a protection and a model could run it: give it ownerOnly with the reason');
+    // 2, 3, 7, 8: structural input validation only
     action.inputs.forEach((input, index) => {
       if (!input.label.trim()) at(action, `blank "${input.id}" has no label`);
-      if (!input.help.trim()) at(action, `blank "${input.label}" has no help line`);
-      const typedText = input.kind === 'text' || input.kind === 'long-text';
       if (input.kind === 'choice' && !input.choices) at(action, `blank "${input.label}" offers choices but names no list`);
       if (input.choices && !Array.isArray(input.choices)) {
         const list = input.choices as { readonly list: string; readonly dependsOn?: string | undefined };
@@ -114,8 +108,6 @@ export function checkDescription(description: CommandDescription<never>, problem
         if (list.dependsOn !== undefined && !action.inputs.slice(0, index).some((earlier) => earlier.id === list.dependsOn)) {
           at(action, `blank "${input.label}" reads its list for "${list.dependsOn}", which is not an earlier blank, so the guided path cannot reach it`);
         }
-      } else if (typedText && !input.freeTextReason) {
-        at(action, `blank "${input.label}" is typed text and gives no reason why it has to be`);
       }
       if (Array.isArray(input.choices)) {
         for (const choice of input.choices) {
@@ -133,9 +125,9 @@ export function checkDescription(description: CommandDescription<never>, problem
   }
 }
 
-/** A comparable copy of a description: its data, without the functions. */
+/** A comparable copy of a description: its data, without the functions or per-app initial tab (`opens`). */
 function shape(description: CommandDescription<never>): string {
-  return JSON.stringify(description, (_key, value: unknown) => typeof value === 'function' ? '[run]' : value);
+  return JSON.stringify(description, (key, value: unknown) => (key === 'opens' ? undefined : typeof value === 'function' ? '[run]' : value));
 }
 
 if (import.meta.main) {

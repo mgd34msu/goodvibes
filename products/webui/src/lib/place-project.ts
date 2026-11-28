@@ -182,10 +182,10 @@ export function usePlaceProjects(): PlaceProjects {
 export function lastChosenProject(): string | undefined {
   const chat = chatCallProject();
   if (chat) return chat;
-  return chosen && chosen.startsWith('/') ? chosen : undefined;
+  return chosen && chosen !== EVERY_PROJECT && chosen !== NO_PROJECT ? chosen : undefined;
 }
 
 /** A project's short name: its last folder. */
 export function projectName(project: string): string {
-  return project.split('/').filter(Boolean).at(-1) ?? project;
+  return project.split(/[/\\]/).filter(Boolean).at(-1) ?? project;
 }

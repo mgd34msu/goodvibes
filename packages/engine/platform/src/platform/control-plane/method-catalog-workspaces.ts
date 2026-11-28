@@ -46,7 +46,7 @@ export const builtinGatewayWorkspacesMethodDescriptors: readonly GatewayMethodDe
     id: 'workspaces.projects.list',
     title: 'List the Projects the Daemon Knows',
     description:
-      'The projects a caller with no folder of its own (the web UI, a script) can choose to act in: the daemon\'s own working folder (daemonFolder: true), then every registered workspace root with its label, each once. A capability bound to a project takes the chosen one as workingDirectory (capabilities.run, places.counts) or project (worktrees.snapshot); nothing picks one for the caller. Read-only.',
+      'The registered workspace roots a caller with no folder of its own (the web UI, a script) can choose to act in, each once with its label. The daemon\'s own folder is never offered as a project. A capability bound to a project takes the chosen one as workingDirectory (capabilities.run, places.counts) or project (worktrees.snapshot); nothing picks one for the caller. Read-only.',
     category: 'workspaces',
     effects: ['workspaces.read'],
     transport: ['ws'],

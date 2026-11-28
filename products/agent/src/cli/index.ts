@@ -6,6 +6,5 @@ export * from './external-runtime.ts';
 export * from './completion.ts';
 export * from './config-overrides.ts';
 export * from './endpoints.ts';
-export * from './bundle-command.ts';
 export * from './import-command.ts';
 export * from './management.ts';

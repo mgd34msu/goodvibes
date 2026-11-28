@@ -795,7 +795,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // An ask about a call in another project (a runner, an agent or a hosted agent the daemon runs there: its request
   // names that project, permissions/call-project.ts) waits on THAT project's trust, with a question naming it; the
   // daemon's own folder's trust says nothing about another project.
-  const projectAsks = new Map<WorkspaceTrustManager, ApprovalRaiser>();
+  const projectAsks = new WeakMap<WorkspaceTrustManager, ApprovalRaiser>();
   const requestApproval: ApprovalRaiser = workspaceTrustFor && trustChoice && !trustChoice.requestTrustDecision
     ? (input) => {
       const folder = input.request.workingDirectory;
@@ -1377,5 +1377,5 @@ function defaultWorkspaceCheckpoints(input: {
   void manager.init().catch((error: unknown) => {
     logger.warn('WorkspaceCheckpointManager.init failed', { error: summarizeError(error) });
   });
-  return { manager };
+  return { manager, close: () => manager.drain() };
 }

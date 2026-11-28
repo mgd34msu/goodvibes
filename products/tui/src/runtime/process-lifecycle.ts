@@ -287,7 +287,6 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
   const restoreTerminal = (): void => {
     noticesClosed = true;
     rejectionNotices.dispose();
-    bestEffort('host pairing cancellation', () => getInput().hostPairing?.dispose());
     bestEffort('terminal restore write', () => terminalLifecycle.restoreTerminal());
   };
 

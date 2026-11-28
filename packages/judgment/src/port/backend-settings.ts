@@ -35,7 +35,7 @@ export function captureJudgmentBackendSettings(value: unknown): JudgmentBackendS
     for (let index = 0; index < length; index++) {
       const descriptor = Object.getOwnPropertyDescriptor(responseModels, index);
       const model: unknown = descriptor && 'value' in descriptor ? descriptor.value : undefined;
-      if (!descriptor?.enumerable || typeof model !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,255}$/.test(model)) throw new Error('Invalid judgment model alias');
+      if (!descriptor?.enumerable || typeof model !== 'string' || !/^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$/.test(model)) throw new Error('Invalid judgment model alias');
       entries.push(model);
     }
     models = Object.freeze(entries);

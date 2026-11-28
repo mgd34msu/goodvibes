@@ -161,7 +161,7 @@ async function runOwnedGoogleSetupFlow(path: GoogleSetupPath, deps: GoogleSetupF
     warnings.push(...(outcome.warnings ?? []));
     deps.progress.stepFinished(spec, result);
 
-    if (deps.signal?.aborted === true) {
+    if ((deps.signal as AbortSignal | undefined)?.aborted === true) {
       // Stopped by the person: nothing is handed to them, and no later step starts.
       halted = true;
     } else if (result.outcome === 'needs-human') {

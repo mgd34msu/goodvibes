@@ -542,7 +542,7 @@ Spawn a discovered third-party agent into a working directory as a hosted daemon
 
 #### `approvals.approve`
 
-Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval's own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command's terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response's recorded block reports what the broker actually recorded. Every action sends `expectedRevision`, the `revision` of the approval it showed or read; without it the call is 400 INVALID_ARGUMENT. The answer is 200 with `applied`, the record and its `reading` for the caller as they are now; when `applied` is false, `refusal.code` says why: APPROVAL_SETTLED (it already ended; the first decision stands), APPROVAL_CHANGED (it moved since that revision: show the returned reading again and act on its revision), APPROVAL_EXPIRED (its deadline passed first; it is now expired), OWNER_DECISION_REQUIRED (only the paired-owner decision on the device that raised it can approve it). Malformed `disposition`, `selectedHunks`, `rememberTier`, `reason` or `modifiedArgs`, a hunk index out of range and `remember` with an amendment are 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is the owner's act: the Agent's credential is refused 403 OWNER_ONLY, and so is a token minted for automation for a change put to the owner (metadata `ownerAct`).
+Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval's own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command's terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response's recorded block reports what the broker actually recorded. Every action sends `expectedRevision`, the `revision` of the approval it showed or read; without it the call is 400 INVALID_ARGUMENT. The answer is 200 with `applied`, the record and its `reading` for the caller as they are now; when `applied` is false, `refusal.code` says why: APPROVAL_SETTLED (it already ended; the first decision stands), APPROVAL_CHANGED (it moved since that revision: show the returned reading again and act on its revision), APPROVAL_EXPIRED (its deadline passed first; it is now expired), OWNER_DECISION_REQUIRED (only the paired-owner decision on the device that raised it can approve it). Malformed `disposition`, `selectedHunks`, `rememberTier`, `reason` or `modifiedArgs`, a hunk index out of range and `remember` with an amendment are 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is your own act, from any of your credentials: the Agent's credential is refused 403 OWNER_ONLY (a model is acting with it), and so is a device whose stored scope list does not hold the right to answer.
 
 - Title: `Approve Approval`
 - Source: `builtin`
@@ -3914,7 +3914,7 @@ Claim a pending approval for operator handling. A claim is advisory: it shows wh
 
 #### `approvals.deny`
 
-Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user's free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response's recorded block reports what the broker actually recorded. Every action sends `expectedRevision`, the `revision` of the approval it showed or read; without it the call is 400 INVALID_ARGUMENT. The answer is 200 with `applied`, the record and its `reading` for the caller as they are now; when `applied` is false, `refusal.code` says why: APPROVAL_SETTLED (it already ended; the first decision stands), APPROVAL_CHANGED (it moved since that revision: show the returned reading again and act on its revision), APPROVAL_EXPIRED (its deadline passed first; it is now expired), OWNER_DECISION_REQUIRED (only the paired-owner decision on the device that raised it can approve it). `disposition` is `denied` or `amended` (an amendment cannot be remembered). Malformed `disposition`, `rememberTier` or `reason` is 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is the owner's act: the Agent's credential is refused 403 OWNER_ONLY, and so is a token minted for automation for a change put to the owner (metadata `ownerAct`).
+Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user's free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response's recorded block reports what the broker actually recorded. Every action sends `expectedRevision`, the `revision` of the approval it showed or read; without it the call is 400 INVALID_ARGUMENT. The answer is 200 with `applied`, the record and its `reading` for the caller as they are now; when `applied` is false, `refusal.code` says why: APPROVAL_SETTLED (it already ended; the first decision stands), APPROVAL_CHANGED (it moved since that revision: show the returned reading again and act on its revision), APPROVAL_EXPIRED (its deadline passed first; it is now expired), OWNER_DECISION_REQUIRED (only the paired-owner decision on the device that raised it can approve it). `disposition` is `denied` or `amended` (an amendment cannot be remembered). Malformed `disposition`, `rememberTier` or `reason` is 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is your own act, from any of your credentials: the Agent's credential is refused 403 OWNER_ONLY (a model is acting with it), and so is a device whose stored scope list does not hold the right to answer.
 
 - Title: `Deny Approval`
 - Source: `builtin`
@@ -32164,7 +32164,7 @@ The capabilities this daemon knows, as a screen draws them: each one's id, group
 
 #### `capabilities.run`
 
-Runs one capability by id with its inputs (names and values as capabilities.find lists them), as the same act would run from any other source: the inputs are checked against its definition, its effects are admitted for the caller, and then a person's own request (a sign-in, a paired device or an app on this machine stating a person asked) runs at once, a call the Agent makes after its own capability gate judged it (the Agent's credential with that gate's mark) runs, and any other caller's call, the Agent's credential without the mark included, is decided under the owner's permission mode with who is asking as a fact: YOLO runs it when the caller's scopes and reach allow it, Jev decides gives it to Jev's permission decision, Ask me raises the one approval card and this call waits on the owner's answer (the caller closing its connection withdraws the question; nothing of it is kept). A capability with its own method runs through that method. workingDirectory is the caller's project (a hooks file, a project secret store); program is the terminal program asking (tui or agent); model is the model that program's conversation uses (provider:model), which a capability on that conversation's model (its context window size) acts on unless its inputs name another. The answer is the text a person reads (detail: the capability's own words without its done line), the facts a script reads (never a secret value), the risk and what a repeat of this capability does; reveal is a value the person must see once (a new device's token, a join key), returned only to the person who asked. A call not allowed is refused, 403 CAPABILITY_NOT_APPROVED with the reason. A refusal is never a 500: it keeps the code of what refused it and the status that code stands for (404 NOT_FOUND for what is not held, 422 only for inputs that do not fit, 503 UNAVAILABLE for what this daemon was started without, 409 for any other refusal of the state found, with the capability's own code); a refusal from a method or an outside program the daemon ran for the capability keeps that method's status and code (424 CI_SOURCE_REFUSED for GitHub); 500 is the daemon's own fault. A capability that acts in a project folder is refused at once, 422 CAPABILITY_CALLER_CONTEXT_MISSING, when the call names no workingDirectory: nothing is decided about a call that would then be refused. Under Ask me the owner's yes stands as the person's request for that call's own nested method that needs one (confirmation owner-request), for that one call only; whatever can refuse it without the owner (its inputs, its preview) is checked before the owner is asked. A capability that is the owner's own act, asked for by a caller who is not the owner (an admin's sign-in, a paired device, a member), is an item of the owner's list decided under the owner's mode with who asks as a fact, never refused outright; allowed, it runs with the owner's authority for that one call and its nested methods. A yes that waited is judged again against the mode and the deny rules as they are when the owner answers: plan mode switched on, or a rule that now refuses it, refuses it with that reason. A remembered answer to an outside caller's call is kept for that caller only, and none is offered for an act of the owner's own asked by someone who is not the owner. Folder trust is not asked for a daemon capability: it acts on what the daemon keeps, not in a project folder.
+Runs one capability by id with its inputs (names and values as capabilities.find lists them), as the same act would run from any other source: the inputs are checked against its definition, its effects are admitted for the caller, and then your own call (a sign-in, a paired device, the machine's token, a typed `goodvibes do`, the MCP set-up) is your own act and runs at once in every permission mode; only a model's call (the program's model after its own capability gate judged it, or the model of another program) is decided under the owner's permission mode: YOLO runs it when its scopes and reach allow it, Jev decides gives it to Jev's permission decision, Ask me raises the one approval card and this call waits on the owner's answer (the caller closing its connection withdraws the question; nothing of it is kept). A capability with its own method runs through that method. workingDirectory is the caller's project (a hooks file, a project secret store); program is the terminal program asking (tui or agent); model is the model that program's conversation uses (provider:model), which a capability on that conversation's model (its context window size) acts on unless its inputs name another. The answer is the text a person reads (detail: the capability's own words without its done line), the facts a script reads (never a secret value), the risk and what a repeat of this capability does; reveal is a value the person must see once (a new device's token, a join key), returned only to the person who asked. A call not allowed is refused, 403 CAPABILITY_NOT_APPROVED with the reason. A refusal is never a 500: it keeps the code of what refused it and the status that code stands for (404 NOT_FOUND for what is not held, 422 only for inputs that do not fit, 503 UNAVAILABLE for what this daemon was started without, 409 for any other refusal of the state found, with the capability's own code); a refusal from a method or an outside program the daemon ran for the capability keeps that method's status and code (424 CI_SOURCE_REFUSED for GitHub); 500 is the daemon's own fault. A capability that acts in a project folder is refused at once, 422 CAPABILITY_CALLER_CONTEXT_MISSING, when the call names no workingDirectory: nothing is decided about a call that would then be refused. Under Ask me the owner's yes stands as the person's request for that call's own nested method that needs one (confirmation owner-request), for that one call only; whatever can refuse it without the owner (its inputs, its preview) is checked before the owner is asked. A capability that is the owner's own act is made by you from any of your credentials; a model asking for one is decided under the owner's mode, and a model never makes the acts that grant or withdraw access, sign anyone in, change a credential or the permission rules. A yes that waited is judged again against the mode and the deny rules as they are when the owner answers: plan mode switched on, or a rule that now refuses it, refuses it with that reason. A remembered answer to a model's call is kept for that caller only. Folder trust is not asked for a daemon capability: it acts on what the daemon keeps, not in a project folder.
 
 - Title: `Run A Capability`
 - Source: `builtin`
@@ -37548,7 +37548,7 @@ Update ingress policy configuration for a channel surface. `open` makes it a sha
 
 #### `channels.profiles.delete`
 
-Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal. Removing a binding whose permission mode is tighter than the one its channel's sessions would fall back to (the surface-wide binding's, else the host's) loosens it, which is the owner's own act: from a caller who is not the owner it answers 202 OWNER_APPROVAL_PENDING and is removed when the owner approves it; with no approval path it is 403 OWNER_ONLY.
+Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal. Removing a binding whose permission mode is tighter than the one its channel's sessions would fall back to (the surface-wide binding's, else the host's) loosens it, which every credential of the user does at once (a device holding a narrow scope list is refused by its scopes).
 
 - Title: `Unbind Channel Profile`
 - Source: `builtin`
@@ -38025,7 +38025,7 @@ Return every per-channel profile binding: the model, provider and permission-mod
 
 #### `channels.profiles.set`
 
-Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names. A set that loosens the permission mode the channel's sessions run under (against the mode they get now, the host's when no binding sets one; leaving permissionMode out of a set removes the key's own mode) is the owner's own act, as sessions.permissionMode.set is: from a caller who is not the owner it is put to the owner and answers 202 OWNER_APPROVAL_PENDING with approvalId, followable, the current binding, mode, requestedMode, state and next, and applies when the owner approves it; with no approval path it is 403 OWNER_ONLY and nothing is changed.
+Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names. A set that loosens the permission mode the channel's sessions run under (against the mode they get now, the host's when no binding sets one; leaving permissionMode out of a set removes the key's own mode) is made at once by every credential of the user, as sessions.permissionMode.set is (a device holding a narrow scope list is refused by its scopes).
 
 - Title: `Bind Channel Profile`
 - Source: `builtin`
@@ -41694,6 +41694,9 @@ Create a standing watch on a repo/ref or PR. On a terminal verdict it notifies t
     "prNumber": {
       "type": "number"
     },
+    "workingDirectory": {
+      "type": "string"
+    },
     "deliveryChannel": {
       "type": "string"
     },
@@ -41722,6 +41725,9 @@ Create a standing watch on a repo/ref or PR. On a terminal verdict it notifies t
           "type": "string"
         },
         "continuationId": {
+          "type": "string"
+        },
+        "project": {
           "type": "string"
         },
         "repo": {
@@ -41902,6 +41908,9 @@ Return every standing CI watch, each with `expiresAt` (when it ends without a ve
             "type": "string"
           },
           "continuationId": {
+            "type": "string"
+          },
+          "project": {
             "type": "string"
           },
           "repo": {
@@ -46583,7 +46592,7 @@ Return the resolved GoodVibes config snapshot.
 
 #### `config.reset`
 
-Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (no caller moves the daemon). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.
+Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (no caller moves the daemon). A change that loosens a security, permission, judgment or payment setting is made at once by every credential of the user (a sign-in under any name, a device paired with full scopes, the operator token); the permission mode in force decides one sent without the person's claim, as for any call. A device holding a narrow scope list reaches only what its list names (this method needs write:config and an admin: it is refused 403).
 
 - Title: `Reset Config Value`
 - Source: `builtin`
@@ -46730,7 +46739,7 @@ Remove the explicit value of one config key through the daemon API so it reads a
 
 #### `config.set`
 
-Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE): the daemon serves every project at once and no caller moves it, so a call names its project itself. The same route also serves the settings clients' lane, which answers with its own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.
+Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE): the daemon serves every project at once and no caller moves it, so a call names its project itself. The same route also serves the settings clients' lane, which answers with its own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer). A change that loosens a security, permission, judgment or payment setting is made at once by every credential of the user (a sign-in under any name, a device paired with full scopes, the operator token); the permission mode in force decides one sent without the person's claim, as for any call. A device holding a narrow scope list reaches only what its list names (this method needs write:config and an admin: it is refused 403).
 
 - Title: `Set Config Value`
 - Source: `builtin`
@@ -47006,7 +47015,7 @@ Write one config value on the daemon: `{ key, value }`, where value is any JSON 
 
 #### `config.setMany`
 
-Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE), as with config.set. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.
+Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE), as with config.set. A change that loosens a security, permission, judgment or payment setting is made at once by every credential of the user (a sign-in under any name, a device paired with full scopes, the operator token); the permission mode in force decides one sent without the person's claim, as for any call. A device holding a narrow scope list reaches only what its list names (this method needs write:config and an admin: it is refused 403).
 
 - Title: `Set Several Config Values`
 - Source: `builtin`
@@ -55999,6 +56008,28 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
           ],
           "additionalProperties": false
         },
+        "budgetSetByOwner": {
+          "type": "boolean"
+        },
+        "heldChange": {
+          "type": "object",
+          "properties": {
+            "at": {
+              "type": "number"
+            },
+            "step": {
+              "type": "string"
+            },
+            "said": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
+            "said"
+          ],
+          "additionalProperties": false
+        },
         "failureKind": {
           "type": "string",
           "enum": [
@@ -64318,6 +64349,28 @@ One contract with its whole tree, running or ended. The captured input's per-fil
       ],
       "additionalProperties": false
     },
+    "budgetSetByOwner": {
+      "type": "boolean"
+    },
+    "heldChange": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "number"
+        },
+        "step": {
+          "type": "string"
+        },
+        "said": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "at",
+        "said"
+      ],
+      "additionalProperties": false
+    },
     "failureKind": {
       "type": "string",
       "enum": [
@@ -72623,6 +72676,28 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
             "required": [
               "status",
               "note"
+            ],
+            "additionalProperties": false
+          },
+          "budgetSetByOwner": {
+            "type": "boolean"
+          },
+          "heldChange": {
+            "type": "object",
+            "properties": {
+              "at": {
+                "type": "number"
+              },
+              "step": {
+                "type": "string"
+              },
+              "said": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "at",
+              "said"
             ],
             "additionalProperties": false
           },
@@ -81154,6 +81229,28 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
           "required": [
             "status",
             "note"
+          ],
+          "additionalProperties": false
+        },
+        "budgetSetByOwner": {
+          "type": "boolean"
+        },
+        "heldChange": {
+          "type": "object",
+          "properties": {
+            "at": {
+              "type": "number"
+            },
+            "step": {
+              "type": "string"
+            },
+            "said": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
+            "said"
           ],
           "additionalProperties": false
         },
@@ -133316,7 +133413,7 @@ Return every link where the record is the source or the target. Returns 404 when
 
 #### `memory.records.list`
 
-Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project's records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (the owner in person only, their place's "Every project") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.
+Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project's records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (you, from any of your credentials: your place's "Every project") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.
 
 - Title: `List Memory Records`
 - Source: `builtin`
@@ -138063,7 +138160,7 @@ Apply the surface's per-offer decisions in ONE pass: an accepted notifications o
 
 #### `pairing.handoff.create`
 
-The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https: set up a secure address in Settings, General, Secure address (...)" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing, madeBy owner) only when the owner in person asks (their signed-in session, or their own terminal program with a verified registration) with full authority; from anyone else (an admin, a script, the operator token alone, any device, the Agent's credential, a narrowed caller, a call run on the owner's yes to another's request) it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). No code is made that a phone could not open: when the daemon's web address is reachable only from its own machine (a loopback address, or controlPlane.enabled off without web.publicBaseUrl naming it), the call is refused with 409 PAIRING_CODE_UNREACHABLE, saying why and the command to run in a terminal on the daemon's machine (goodvibes-daemon webui enable --lan); pairing.posture.get gives the same decision with numbered steps before anything is minted. `serveToNetwork: true` is the owner's yes to "Phones on your network cannot reach GoodVibes yet. Serve it to your network?", which a pairing surface asks in place of that refusal: the daemon writes what goodvibes-daemon webui enable --lan writes, waits for its own listener to report it is bound again (TRANSPORT_CONNECTED; no sleep, no poll), and then mints for the address phones can open, in the same call; refused 409 PAIRING_CODE_UNREACHABLE only when it still cannot be reached. `fromSharedToken: true`, and `forThisMachine: true` (a code for a browser on the daemon's own machine), are not refused for that.
+The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https: set up a secure address in Settings, General, Secure address (...)" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs holds full authority and is recorded with origin owner-pairing when you ask from any of your credentials (a sign-in under any name, a paired device, the operator token, a typed command, the Agent's credential) without a narrow scope list; a narrowed caller's pairing keeps its list and is recorded as automation. Both are your devices. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is a full device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). No code is made that a phone could not open: when the daemon's web address is reachable only from its own machine (a loopback address, or controlPlane.enabled off without web.publicBaseUrl naming it), the call is refused with 409 PAIRING_CODE_UNREACHABLE, saying why and the command to run in a terminal on the daemon's machine (goodvibes-daemon webui enable --lan); pairing.posture.get gives the same decision with numbered steps before anything is minted. `serveToNetwork: true` is the owner's yes to "Phones on your network cannot reach GoodVibes yet. Serve it to your network?", which a pairing surface asks in place of that refusal: the daemon writes what goodvibes-daemon webui enable --lan writes, waits for its own listener to report it is bound again (TRANSPORT_CONNECTED; no sleep, no poll), and then mints for the address phones can open, in the same call; refused 409 PAIRING_CODE_UNREACHABLE only when it still cannot be reached. `fromSharedToken: true`, and `forThisMachine: true` (a code for a browser on the daemon's own machine), are not refused for that.
 
 - Title: `Create Pairing Hand-off`
 - Source: `builtin`
@@ -138275,7 +138372,7 @@ The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER 
 
 #### `pairing.outsideAgent.issue`
 
-The one credential this daemon gives `goodvibes-daemon mcp serve`, asked for with the operator token: a paired-device token named "Outside agent (goodvibes-daemon mcp serve)" (origin automation), with no person's claim, answered once with `token` and `id`. Making it is the owner's own act: from anyone but the owner it is put to the owner as ONE question, "Let the outside agent "goodvibes-daemon mcp serve" work in <project>?" when the call names the folder it was started in (`project`), else its credential for shared things only; the owner's yes issues it and gives it that project. A second ask while it is kept is refused 409 OUTSIDE_AGENT_ISSUED (revoke it among the paired devices to have a new one issued). Every act of it the owner decides is put to the owner, and the first time it names a project it was not given the owneris asked whether it may work there.
+The one credential this daemon gives `goodvibes-daemon mcp serve`, asked for with the operator token: a paired-device token named "Outside agent (goodvibes-daemon mcp serve)" holding full operator authority, as the operator token does, answered once with `token` and `id`. Nothing is asked and nothing is refused: it is issued at once, and it names any project. `project` (the folder the server was started in) is accepted and not needed. A second ask while it is kept is refused 409 OUTSIDE_AGENT_ISSUED (revoke it among the paired devices to have a new one issued).
 
 - Title: `Issue the Outside Agent Credential`
 - Source: `builtin`
@@ -138607,7 +138704,7 @@ What goodvibes-daemon webui enable --lan does, from any surface, after the owner
 
 #### `pairing.tokens.create`
 
-Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions and write:sessions for a phone that only chats: it reads the chats it made under them); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE. A token minted here is automation (origin automation): it does not make the owner's own acts, such as loosening a security, permission, judgment or payment setting. A device the owner pairs in person is paired with pairing.handoff.create.
+Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions and write:sessions for a phone that only chats: it reads the chats it made under them); left out (or `["*"]`), the device holds full operator authority, and then it is the user's device: it does what every credential of the user does. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE. A device is paired by hand-off with pairing.handoff.create.
 
 - Title: `Mint Paired Device Token`
 - Source: `builtin`
@@ -138691,7 +138788,7 @@ Mint a new named per-device operator token and return its plaintext secret EXACT
 
 #### `pairing.tokens.delete`
 
-Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop. A token the caller minted, or the caller's own token, is revoked at once; any other token (a device the owner paired, another principal's) is the owner's own act: from an admin who is not the owner it is put to the owner (202 OWNER_APPROVAL_PENDING) and revoked when the owner approves it, and any other credential is refused 403 OWNER_ONLY.
+Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop. A token the caller minted, or the caller's own token, is revoked at once; any other token (a device paired, another principal's) is revoked at once by every credential of the user (a sign-in under any name, a device paired with full scopes, the operator token); a device holding a narrow scope list is refused 403 OWNER_ONLY.
 
 - Title: `Revoke Paired Device Token`
 - Source: `builtin`
@@ -138812,7 +138909,7 @@ Revoke (permanently delete) one paired device token. Revocation is immediate: th
 
 #### `pairing.tokens.list`
 
-List the per-pairing operator tokens (paired devices/browsers, and each one made that no device has used yet and that has not expired, marked waitingForFirstUse so it can be revoked before its first use) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did), scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority) and origin: `owner-pairing` for a device the owner paired in person (pairing.handoff.create or the pairing screen asked by the owner in person, their sign-in or their verified program, with full authority, completed with the code their own screen showed; pairing.tokens.migrate by the owner in person), which answers an approval another caller raised and does the owner's native work, and is never the owner in person (its own risky acts are put to the owner), or `automation` for every other token (pairing.tokens.create, a migration or mint made on the owner's yes to someone else's request, a narrowed list, the Agent's credential, and every token minted before origin was recorded), which answers nothing. Origin is recorded at the mint and never changes; to make a device an owner device, pair it again from the pairing screen and revoke the old token. The token secret is never stored in listable form and is never returned.
+List the per-pairing operator tokens (paired devices/browsers, and each one made that no device has used yet and that has not expired, marked waitingForFirstUse so it can be revoked before its first use) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did), scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority) and origin: `owner-pairing` for a device paired from the pairing screen or by pairing.handoff.create with full authority, completed with the code the screen showed (or by pairing.tokens.migrate), or `automation` for every other token (pairing.tokens.create, a migration, a narrowed list, the Agent's credential, and every token minted before origin was recorded). Every paired device is you: what a device may do is limited only by its stored scope list (a device with no list does everything you do, whatever its origin), never by who paired it. Origin is recorded at the mint and never changes; to give a limited device full authority, pair it again from the pairing screen and revoke the old token. The token secret is never stored in listable form and is never returned.
 
 - Title: `List Paired Device Tokens`
 - Source: `builtin`
@@ -138900,7 +138997,7 @@ none
 
 #### `pairing.tokens.migrate`
 
-A client currently authenticated with the legacy single shared token mints its OWN named per-device token and receives the plaintext secret once. A token minted here is automation (origin automation), for a script; the owner's own browser or app moves off the shared token with pairing.handoff.create and `fromSharedToken: true`, which makes it an owner device. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret instead of minting a second one. This does NOT revoke the shared token; that is a separate explicit step (pairing.tokens.revokeShared).
+A client currently authenticated with the legacy single shared token mints its OWN named per-device token and receives the plaintext secret once. A token minted here is labelled automation (origin automation) and is a device of yours like any other; a browser or app can also move off the shared token with pairing.handoff.create and `fromSharedToken: true`, which labels it owner-pairing. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret instead of minting a second one. This does NOT revoke the shared token; that is a separate explicit step (pairing.tokens.revokeShared).
 
 - Title: `Migrate Off The Shared Token`
 - Source: `builtin`
@@ -139028,7 +139125,7 @@ Change the user-visible name of a paired device token. An unknown id is a 404 PA
 
 #### `pairing.tokens.revokeShared`
 
-Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). The owner's own act (access.withdraw): any credential but the owner's own (the operator token, a device the owner paired in person, the owner's sign-in) is refused 403 OWNER_ONLY, an admin's with the reason that it is the owner's to decide. Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Not safe to repeat: each call replaces the shared token again.
+Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). Your own act (access.withdraw): any of your credentials with full authority makes it (the operator token, a paired device, your sign-in, a typed command), at once; a credential with a narrow scope list is refused 403 OWNER_ONLY by that list, and a model never makes it. Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Not safe to repeat: each call replaces the shared token again.
 
 - Title: `Revoke The Legacy Shared Token`
 - Source: `builtin`
@@ -165582,7 +165679,7 @@ Return the session execution mode in force (`mode`): ask-me, jev-decides, just-v
 
 #### `sessions.permissionMode.set`
 
-Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session; a web chat (companion-chat) has no mode of its own, so setting it rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired in person sets it at once): it is put to the owner as an approval only the owner's own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when the owner approves it.
+Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session; a web chat (companion-chat) has no mode of its own, so setting it rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode is set at once by every credential of the user (a sign-in under any name, a device paired with full scopes, the operator token); a device holding a narrow scope list is refused by its scopes.
 
 - Title: `Set Session Permission Mode`
 - Source: `builtin`
@@ -176369,7 +176466,7 @@ Move one step of a waiting plan to another place, counting from 1. The plan wait
 
 #### `work.target`
 
-Read what an act on one piece of work sends, from the work alone: `operation` "execution" answers the identity start, status, stop and resume take (its current attempt and revisions); "contract" answers the run that answering, running a step again and the spending limit act on; "own" answers only whether this caller may act on the work at all (a paired device, the outside agent or a member acts only on work it asked for itself: WORK_NOT_YOURS otherwise). Every other field is passed through. Answers { summary, input }; nothing is kept.
+Read what an act on one piece of work sends, from the work alone: `operation` "execution" answers the identity start, status, stop and resume take (its current attempt and revisions); "contract" answers the run that answering, running a step again and the spending limit act on; "own" answers only whether this caller may act on the work at all (you may from any of your credentials, a sign-in, a paired device or the machine's token; a caller that is not you acts only on work it asked for itself: WORK_NOT_YOURS otherwise). Every other field is passed through. Answers { summary, input }; nothing is kept.
 
 - Title: `Name A Piece Of Work For An Act`
 - Source: `builtin`
@@ -195446,7 +195543,7 @@ Read native hosted dispatch status. Does not admit, claim, retry or execute.
 
 #### `workspaces.projects.list`
 
-The projects a caller with no folder of its own (the web UI, a script) can choose to act in: the daemon's own working folder (daemonFolder: true), then every registered workspace root with its label, each once. A capability bound to a project takes the chosen one as workingDirectory (capabilities.run, places.counts) or project (worktrees.snapshot); nothing picks one for the caller. Read-only.
+The registered workspace roots a caller with no folder of its own (the web UI, a script) can choose to act in, each once with its label. The daemon's own folder is never offered as a project. A capability bound to a project takes the chosen one as workingDirectory (capabilities.run, places.counts) or project (worktrees.snapshot); nothing picks one for the caller. Read-only.
 
 - Title: `List the Projects the Daemon Knows`
 - Source: `builtin`

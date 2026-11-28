@@ -47,7 +47,20 @@ export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
   "network.privateDeliveryHosts",
   "update.auto",
   "update.autoUpdateAtLaunch",
-  "power.keepAwake"
+  "power.keepAwake",
+  "provider.model",
+  "provider.reasoningEffort",
+  "provider.fallbackModels",
+  "provider.optimizerMode",
+  "provider.optimizerPinnedModel",
+  "permissions.mode",
+  "behavior.budgetAlertUsd",
+  "notifications.webhookUrls",
+  "sandbox.mcpIsolation",
+  "sandbox.enabled",
+  "pricing.modelPrices",
+  "storage.codeIndexEnabled",
+  "storage.automaticProjectsFolder"
 ] as const;
 
 export const DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS: readonly string[] = [

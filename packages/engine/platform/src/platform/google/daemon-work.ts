@@ -506,7 +506,8 @@ export class DaemonGoogleWork {
               }),
             ...(state.state === 'consent' ? { state: 'running' as const, needs: undefined } : {}),
           });
-          if (withdraw) { withdraw(); withdraw = null; }
+          const release = withdraw as (() => void) | null;
+      if (release) { release(); withdraw = null; }
         },
         humanActionNeeded: (_spec, instruction) => {
           if (stopped()) return;
@@ -532,7 +533,8 @@ export class DaemonGoogleWork {
       } catch (error) {
         ended = { ok: false, text: `Connecting Google stopped: ${error instanceof Error ? error.message : String(error)}` };
       }
-      if (withdraw) { withdraw(); withdraw = null; }
+      const release = withdraw as (() => void) | null;
+      if (release) { release(); withdraw = null; }
       this.#consentUrl = null;
       const waiting = state.state === 'needs-you' && !stopped();
       set({

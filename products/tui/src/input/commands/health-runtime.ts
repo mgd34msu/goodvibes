@@ -403,13 +403,5 @@ export const healthPolicy: HealthCommandPolicy<CommandContext> = {
       return formatRuntimeStateSnapshot(snapshot, `Runtime State (${new Date(snapshot.capturedAt).toISOString()})`);
     },
     failures: { show: showFailure, save: saveFailure, keep: keepFailure },
-    async stopAgent(ctx, agentId, note) {
-      try {
-        requireOpsApi(ctx).agents.cancel(agentId, note || undefined);
-      } catch (error) {
-        throw commandRefusal(`Agent ${agentId} was not stopped: ${summarizeError(error)}`);
-      }
-      return `Asked agent ${agentId} to stop.`;
-    },
     elsewhere: 'the Agent (goodvibes-agent)',
 };

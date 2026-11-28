@@ -162,7 +162,7 @@ interface SettingFacts {
 /** One read of the program's managed policy and settings layers for every row (never one read per setting). */
 function settingFactsReader(config: ConfigManager): (key: string) => SettingFacts {
   const hostKeys = new Set(config.getHostSettingsSchema().map((setting) => setting.key));
-  let lookup: ((key: ConfigKey) => { readonly entry: { readonly effectiveSource?: string; readonly locked?: boolean; readonly lockReason?: string; readonly conflict?: boolean } } | null) | undefined;
+  let lookup: ((key: ConfigKey) => { readonly entry: { readonly effectiveSource?: string | undefined; readonly locked?: boolean | undefined; readonly lockReason?: string | undefined; readonly conflict?: boolean | undefined } } | null) | undefined;
   let policyProblem: string | undefined;
   try { lookup = readResolvedSettingLookups(config); } catch (error) { policyProblem = errorText(error); }
   let hostLocks: ReadonlyMap<string, { readonly source: string; readonly reason: string }> | undefined;

@@ -58,7 +58,7 @@ describe('first turn', () => {
     expect(screenText(screen)).toContain(PROMPT);
     expect(host!.judgments.requests.length).toBeGreaterThan(0);
     expect(tui!.alive()).toBe(true);
-    expect(host!.daemon.services.contractRunner.list({ includeTerminal: true })).toHaveLength(0);
+    expect(host!.daemon.services.contractRunner?.list({ includeTerminal: true }) ?? []).toHaveLength(0);
     expect(host!.daemon.services.agentManager.list()).toHaveLength(0);
     await tui!.stop();
   });

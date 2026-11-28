@@ -33,9 +33,11 @@
  * value, and the owner is told once which name changed. Nothing else is read or
  * compared.
  */
-import { createHmac, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/index.js';
 import { SecretsManager } from './secrets.js';
 import type { SecretStorageMedium } from './secrets-store-paths.js';
 
@@ -103,7 +105,9 @@ function fingerprintKey(daemonHome: string): Buffer {
   if (existsSync(path)) return Buffer.from(readFileSync(path, 'utf8').trim(), 'hex');
   const key = randomBytes(32);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${key.toString('hex')}\n`, { mode: 0o600 });
+  const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  writeFileSync(temporary, `${key.toString('hex')}\n`, { mode: 0o600 });
+  renameSync(temporary, path);
   return key;
 }
 
@@ -118,14 +122,17 @@ function readRecord(path: string): CarryRecord | undefined {
       version: 2, carriedAt: String(parsed.carriedAt ?? ''), carried: parsed.carried ?? [], differing: parsed.differing ?? [],
       kept: parsed.kept ?? [], fingerprints: parsed.fingerprints ?? {},
     } : undefined;
-  } catch {
+  } catch (error) {
+    logger.warn('secrets-carry-forward: could not parse carry record; re-checking stored secrets', { path, error: summarizeError(error) });
     return undefined;
   }
 }
 
 function writeRecord(path: string, record: CarryRecord): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  renameSync(temporary, path);
 }
 
 interface HeldValue { readonly program: string; readonly value: string; readonly medium: SecretStorageMedium }

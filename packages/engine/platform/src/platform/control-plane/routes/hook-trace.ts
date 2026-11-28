@@ -5,7 +5,7 @@
  * came from another process); one that does not read as a run is counted as
  * refused and left out, the rest are kept.
  */
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import { HOOK_TRACE_POST_METHOD_ID } from '../method-catalog-hooks.js';
 import { attachHandler } from './attach-handler.js';
@@ -25,7 +25,13 @@ export function registerHookTraceGatewayMethods(catalog: GatewayMethodCatalog, s
     const runs = Array.isArray(params['runs']) ? params['runs'] : undefined;
     if (!runs) throw new GatewayVerbError('runs is a list of hook runs.', 'INVALID_ARGUMENT', 400, 'runs');
     if (runs.length > MAX_RUNS) throw new GatewayVerbError(`At most ${MAX_RUNS} runs in one post; this one had ${runs.length}.`, 'INVALID_ARGUMENT', 400, 'runs');
-    const project = typeof params['project'] === 'string' && params['project'].trim() ? resolve(params['project'].trim()) : undefined;
+    const rawProject = typeof params['project'] === 'string' && params['project'].trim()
+      ? params['project'].trim()
+      : invocation.context.call?.project?.trim();
+    if (rawProject !== undefined && rawProject !== '' && !isAbsolute(rawProject)) {
+      throw new GatewayVerbError('project must be an absolute path.', 'INVALID_ARGUMENT', 400, 'project');
+    }
+    const project = rawProject ? resolve(rawProject) : undefined;
     const kept: HookTraceRecord[] = [];
     let refused = 0;
     for (const run of runs) {

@@ -695,11 +695,17 @@ export function createNativeWorkExecutionHost(deps: {
   }
   /** Runs the owner stopped by their answer to a question ("stop", "cancel"), already written to the ledger as stopped. */
   const answeredStops = new Set<string>();
+  const ANSWERED_STOPS_BOUND = 1024;
   function sayStanding(contract: ContractView): void {
     const key = contract.durableAdmission?.key; if (!key) return;
     // Stopped by the owner's answer (not through cancel here): the ledger says stopped too, as for their stop in Work.
     if (contract.status === 'cancelled' && contract.failureKind === 'owner-rejected' && deps.storage.reportStopped && !answeredStops.has(contract.id)) {
+      if (answeredStops.size >= ANSWERED_STOPS_BOUND) {
+        const oldest = answeredStops.values().next().value;
+        if (oldest !== undefined) answeredStops.delete(oldest);
+      }
       answeredStops.add(contract.id);
+      lastStanding.delete(contract.id);
       const write = deps.storage.reportStopped(key, contract.error ?? 'Stopped by you.', active.get(key.attemptId)?.record).catch((error: unknown) => {
         answeredStops.delete(contract.id);
         logger.warn('A piece of work the owner stopped by their answer was not written to the ledger as stopped', { attemptId: key.attemptId, error: summarizeError(error) });
@@ -709,6 +715,7 @@ export function createNativeWorkExecutionHost(deps: {
     }
     const standing = standingOf(contract);
     if (standing) writeStanding(key, contract.id, standing);
+    else lastStanding.delete(contract.id);
   }
   const continuations = createNativeCiContinuationHost({ projectId: deps.projectId, projectRoot, storage: deps.storage,
     scopes: deps.scopes, ...(deps.continuationGrants ? { grants: deps.continuationGrants } : {}),
@@ -819,7 +826,10 @@ export function createNativeWorkExecutionHost(deps: {
         if (!latest.record) {
           const intent = await prepareIntent(stored.target, authority, delivery, true, signal);
           const record = await decide(stored.target, authority, signal, false, intent);
-          claimOwner(record, authority); const retained = await retainReceipt(await requireRunner().startDurable(record.request)); settleAfterCompletion(retained, authority); return retained;
+          claimOwner(record, authority);
+          const launched = await requireRunner().startDurable(record.request);
+          try { const retained = await retainReceipt(launched); settleAfterCompletion(retained, authority); return retained; }
+          catch (error) { await cancelAndJoin(launched.admission.contractId, 'Native association could not be retained'); throw error; }
         }
         const existing = latest.record; inspectAuthority(existing, authority);
         if (existing.state === 'cancelled') throw new NativeWorkExecutionError('stale');
@@ -831,7 +841,9 @@ export function createNativeWorkExecutionHost(deps: {
         // the caller. That caller adopts the launch. The runner returns a run
         // it already holds unchanged, so adopting never starts a second one.
         if (existing.state === 'launch-claimed' && !owner.claimed) { owner.claimed = true; if (existing.receipt) owner.contractId = existing.receipt.contractId; }
-        const retained = await retainReceipt(await requireRunner().resumeDurable(key)); settleAfterCompletion(retained, authority); return retained;
+        const launched = await requireRunner().resumeDurable(key);
+        try { const retained = await retainReceipt(launched); settleAfterCompletion(retained, authority); return retained; }
+        catch (error) { await cancelAndJoin(launched.admission.contractId, 'Native association could not be retained'); throw error; }
       });
     },
     settle,
@@ -860,7 +872,7 @@ export function createNativeWorkExecutionHost(deps: {
       // A settlement waits for its run to end, which it no longer does here: it is not waited for (the lifetime's
       // abort ends it), and the next start settles the work once it is done.
       const settling = new Set<Promise<unknown>>([...settlements.values()].map(entry => entry.promise));
-      closing = Promise.allSettled([continuationDrain, ...standingWrites, ...[...pending].filter(promise => !settling.has(promise))]).then(() => { active.clear(); }); return closing;
+      closing = Promise.allSettled([continuationDrain, ...standingWrites, ...[...pending].filter(promise => !settling.has(promise))]).then(() => { active.clear(); lastStanding.clear(); answeredStops.clear(); }); return closing;
     },
   };
   return host;

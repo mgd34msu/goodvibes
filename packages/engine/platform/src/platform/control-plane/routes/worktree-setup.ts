@@ -36,9 +36,14 @@ export interface WorktreeSetupGatewayDeps {
   readonly forProject?: ((project: string) => Omit<WorktreeSetupGatewayDeps, 'forProject'>) | undefined;
 }
 
-/** The project a call names (`project`), or the daemon's own folder when it names none. */
-function depsFor(deps: WorktreeSetupGatewayDeps, params: Record<string, unknown>): Omit<WorktreeSetupGatewayDeps, 'forProject'> {
-  const named = typeof params.project === 'string' ? params.project.trim() : '';
+/** The project a call names (`project` or `x-goodvibes-project`), or the daemon's own folder when it names none. */
+function namedProjectOf(params: Record<string, unknown>, callProject: string | undefined): string {
+  const fromParam = typeof params.project === 'string' ? params.project.trim() : '';
+  return fromParam || callProject?.trim() || '';
+}
+
+function depsFor(deps: WorktreeSetupGatewayDeps, params: Record<string, unknown>, callProject?: string): Omit<WorktreeSetupGatewayDeps, 'forProject'> {
+  const named = namedProjectOf(params, callProject);
   if (!named) return deps;
   if (!isAbsolute(named)) throw new GatewayVerbError(`project is a folder's full path; "${named}" is not, so nothing was run or changed.`, 'INVALID_REQUEST', 400, 'project');
   if (!deps.forProject) throw new GatewayVerbError('This daemon serves only its own folder\'s worktrees; nothing was run or changed.', 'NOT_FOUND', 404, 'project');
@@ -79,7 +84,7 @@ export function createWorktreeSetupRunHandler(deps: WorktreeSetupGatewayDeps): G
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const path = requireStringValue(params.path, 'path');
-    const project = depsFor(deps, params);
+    const project = depsFor(deps, params, invocation.context.call?.project);
     const worktreePath = await resolveLinkedWorktree(project, path);
     const notUsed = project.commandsNotUsed?.();
     const setup = await runWorktreeSetup(worktreePath, project.sourceRoot, project.resolveConfig());
@@ -99,24 +104,24 @@ export function createWorktreeDiscardHandler(deps: WorktreeSetupGatewayDeps): Ga
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const path = requireStringValue(params.path, 'path');
-    const project = depsFor(deps, params);
+    const project = depsFor(deps, params, invocation.context.call?.project);
     return await project.registry.discard(resolve(project.sourceRoot, path));
   };
 }
 
 /**
- * `worktrees.snapshot` for the project a call names (`project`: that project's one register file, as its terminal
- * programs keep it), or the daemon's own folder when it names none. The same records and summary either way.
+ * `worktrees.snapshot` for the project a call names (`project` or `x-goodvibes-project`: that project's one register file,
+ * as its terminal programs keep it), or the daemon's own folder when it names none. The same records and summary either way.
  */
 export function createWorktreeSnapshotHandler(deps: WorktreeSetupGatewayDeps): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const named = typeof params.project === 'string' ? params.project.trim() : '';
-    // A project that is not a git repository has no worktrees: an empty list, not a refusal (nothing is wrong there).
-    if (named && isAbsolute(named) && deps.forProject && (!existsSync(named) || !GitService.isGitRepo(named))) {
+    const named = namedProjectOf(params, invocation.context.call?.project);
+    // An existing non-git project has no worktrees (empty list); a missing path still hits depsFor's 404.
+    if (named && isAbsolute(named) && deps.forProject && existsSync(named) && !GitService.isGitRepo(named)) {
       return { summary: summarizeWorktreeOwnership([]), records: [] };
     }
-    const project = depsFor(deps, params);
+    const project = depsFor(deps, params, invocation.context.call?.project);
     const records = listPersistedWorktreeMeta({ workingDirectory: project.sourceRoot });
     return { summary: summarizeWorktreeOwnership(records), records };
   };

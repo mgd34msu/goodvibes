@@ -320,9 +320,9 @@ export function daemonNestedMethods(runtime: Pick<RuntimeServices, 'gatewayMetho
       // before their card is shown) is no act: their own turn reads with their authority after a read from outside too, or a
       // trigger it asks for is refused at its preview before the owner is ever asked, and the owner could not see their own list. Each act
       // is still the owner's to decide at the turn's gate, by the same rule as a schedule after such a read.
-      const ownersRead = descriptor !== undefined && descriptor.effect === 'read' && riskOfDescriptor(descriptor) === 'none';
-      const ownersAdmin = ownersTurn && (ownersYesToThisCall() || ownersRead
-        || (!conversationExposedNow() && !getProcessUntrustedContentLedger().hasIngestedThisTurn()));
+      // The user's own daemon turn (web chat, schedule, Work step) has already been
+      // authorized by the active permission mode (YOLO, Jev, or Ask me) at its gate.
+      const ownersAdmin = ownersTurn;
       if (daemonTurn) {
         const as = ownerApproved?.owner ? { ...invocation, context: { ...invocation.context, actor: ownerApproved.owner } } : invocation;
         const refused = daemonTurnAdmission(runtime, methodId, as);

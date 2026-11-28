@@ -21,7 +21,7 @@ import type { AgentSkillBundleRecord, AgentSkillRecord } from '../../skills/libr
 import type { EcosystemCatalogPathOptions } from '../../runtime/ecosystem/catalog.js';
 import { listInstalledEcosystemEntries, loadEcosystemCatalog, removeEcosystemCatalogEntry, upsertEcosystemCatalogEntry } from '../../runtime/ecosystem/catalog.js';
 import {
-  CapabilityRefusal, REPLACED_DONE, type ActionValues, type CapabilityCaller, type CapabilityDefinition, type CapabilityResult, type InputDescription, type ListName,
+  CapabilityRefusal, REPLACED_DONE, UNNAMED_AUTHOR, type ActionValues, type CapabilityCaller, type CapabilityDefinition, type CapabilityResult, type InputDescription, type ListName,
 } from '../types.js';
 import { fixedInput, pickedInput, wordsInput } from './agent-stores.js';
 import { noteListChanged } from '../../runtime/list-changes.js';
@@ -100,8 +100,8 @@ function sourceOf(caller: CapabilityCaller): 'user' | 'agent' {
 /** Marking reviewed, and switching on what nobody reviewed, count only from the owner in person (their press, their yes). */
 function ownerMay(caller: CapabilityCaller, what: string): void {
   if (caller.author?.kind === 'owner') return;
-  throw new CapabilityRefusal(`${what} is the owner's decision that its text may reach the prompt, so it counts only when the owner does it in person; nothing was changed.`,
-    'Ask the owner to do it in Tools and extensions, on the skill.', 'OWNER_REVIEW_REQUIRED');
+  throw new CapabilityRefusal(`${what} lets its text reach the prompt, so it must be reviewed directly by you; nothing was changed.`,
+    'Review it in Tools and extensions, on the skill.', 'OWNER_REVIEW_REQUIRED');
 }
 
 // ---------------------------------------------------------------------------

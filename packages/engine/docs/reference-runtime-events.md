@@ -3167,6 +3167,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `ownerAgentId` | string | yes |
 | `gateProblems` | string[] | optional |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_STATUS_CHANGED`
 
@@ -3176,6 +3180,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `from` | enum: `awaiting-owner`, `cancelled`, `checking-plan`, `committing`, `failed`, `fixing`, `judging`, `passed`, `planning`, `queued`, `running`, `shaping` | yes |
 | `to` | enum: `awaiting-owner`, `cancelled`, `checking-plan`, `committing`, `failed`, `fixing`, `judging`, `passed`, `planning`, `queued`, `running`, `shaping` | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_SHAPED`
 
@@ -3200,6 +3208,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `asksForAttempts.outcome` | enum: `act`, `confirm`, `escalate` | yes |
 | `decisionIds` | string[] | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_PLANNED`
 
@@ -3230,6 +3242,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `units[].attempts` | number | yes |
 | `repair` | number | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_PLAN_CHECKED`
 
@@ -3245,6 +3261,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `problems[].message` | string | yes |
 | `decisionIds` | string[] | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_GROUP_STATUS_CHANGED`
 
@@ -3255,6 +3275,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `from` | enum: `awaiting-owner`, `blocked`, `cancelled`, `failed`, `fixing`, `judging`, `passed`, `pending`, `running` | yes |
 | `to` | enum: `awaiting-owner`, `blocked`, `cancelled`, `failed`, `fixing`, `judging`, `passed`, `pending`, `running` | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_UNIT_STATUS_CHANGED`
 
@@ -3267,6 +3291,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `to` | enum: `awaiting-owner`, `blocked`, `cancelled`, `checking`, `failed`, `fixing`, `held`, `held-merge`, `nudged`, `passed`, `pending`, `running` | yes |
 | `agentId` | string | optional |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_UNIT_SPAWNED`
 
@@ -3280,8 +3308,12 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `route.provider` | string | yes |
 | `route.reasoningEffort` | string | optional |
 | `route.reason` | string | yes |
-| `purpose` | enum: `fresh-unit`, `resume`, `silence-retry`, `transport-retry`, `unit` | yes |
+| `purpose` | enum: `fresh-unit`, `resume`, `transport-retry`, `unit` | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_CHECKED`
 
@@ -3315,6 +3347,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `claims` | enum: `files_verified`, `git_corroborated`, `unverifiable_no_claims`, `unverified`, `verified_empty` | optional |
 | `decisionIds` | string[] | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_NUDGED`
 
@@ -3329,6 +3365,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `delivery` | enum: `bus`, `hold`, `wake` | yes |
 | `agentId` | string | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_NUDGE_CONSUMED`
 
@@ -3340,6 +3380,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `agentId` | string | yes |
 | `turn` | number | optional |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_CRITERION_REGRESSED`
 
@@ -3351,6 +3395,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `metAtCheckId` | string | yes |
 | `checkId` | string | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_STALLED`
 
@@ -3364,6 +3412,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `reason` | string | yes |
 | `decisionId` | string | optional |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_FIX_PLANNED`
 
@@ -3376,6 +3428,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `unitIds` | string[] | yes |
 | `round` | number | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_ESCALATED`
 
@@ -3389,6 +3445,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `question` | string | yes |
 | `unmetCriterionIds` | string[] | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_OWNER_REPLIED`
 
@@ -3400,6 +3460,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `outcome` | enum: `act`, `confirm`, `escalate` | yes |
 | `action` | enum: `amended`, `approved`, `asked-again`, `refused`, `stopped` | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_WAITING`
 
@@ -3408,6 +3472,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `contractId` | string | yes |
 | `reason` | string | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_GATE_RESULT`
 
@@ -3423,6 +3491,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `required` | boolean | optional |
 | `reason` | string | optional |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_MERGE_CONFLICT`
 
@@ -3434,6 +3506,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `path` | string | yes |
 | `files` | string[] | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_ATTEMPTS_SELECTED`
 
@@ -3446,6 +3522,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `outcome` | enum: `act`, `confirm`, `escalate` | yes |
 | `decisionId` | string | optional |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_COMMITTED`
 
@@ -3456,6 +3536,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `hash` | string | optional |
 | `note` | string | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_PASSED`
 
@@ -3467,6 +3551,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `excluded` | number | yes |
 | `nudges` | number | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_FAILED`
 
@@ -3479,6 +3567,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `turnLimit` | number | optional |
 | `turnLimitSource` | enum: `default`, `policy-bound`, `spawn-override` | optional |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_CANCELLED`
 
@@ -3488,6 +3580,10 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `reason` | string | yes |
 | `filesModified` | number | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 
 ### `CONTRACT_SPAWN_GUARD_TRIGGERED`
 
@@ -3499,4 +3595,8 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `activeAgents` | number | yes |
 | `reason` | string | yes |
 | `occurrenceId` | string | optional |
+| `about` | object | optional |
+| `about.project` | string|null | yes |
+| `about.kind` | enum: `checkpoint`, `contract`, `watcher`, `work-plan`, `work-plan-task` | yes |
+| `about.id` | string | yes |
 

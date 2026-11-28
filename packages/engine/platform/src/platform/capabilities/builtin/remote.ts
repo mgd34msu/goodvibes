@@ -174,7 +174,10 @@ const CONNECTION_WORDS: Readonly<Record<string, string>> = {
 };
 
 function reviewModeText(selected: SupervisorSession): string {
-  return runnerReviewText({ trustClass: selected.negotiation.trustClass, capabilityCeiling: { reviewMode: selected.negotiation.reviewMode } as RemoteRunnerContract['capabilityCeiling'] });
+  return runnerReviewText({
+    trustClass: selected.negotiation.trustClass as RemoteRunnerContract['trustClass'],
+    capabilityCeiling: { reviewMode: selected.negotiation.reviewMode } as unknown as RemoteRunnerContract['capabilityCeiling'],
+  });
 }
 
 /** What a supervised runner can do and cannot, one line each, in words. */

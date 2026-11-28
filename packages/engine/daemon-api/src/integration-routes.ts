@@ -249,7 +249,8 @@ export function createDaemonIntegrationRouteHandlers(
       // A delivery is its schedule run's: a caller that is not the owner in person reads one only of a run it may reach,
       // answered as for no delivery (pagination.ts currentRecordReach, platform control-plane/caller-reach.ts).
       const reach = currentRecordReach();
-      const delivery = found && (!reach || reach('schedule-run', found.runId)) ? found : undefined;
+      const runId = found && typeof (found as { readonly runId?: unknown }).runId === 'string' ? (found as { readonly runId: string }).runId : undefined;
+      const delivery = found && (!reach || (runId !== undefined && reach('schedule-run', runId))) ? found : undefined;
       if (!delivery) {
         return jsonErrorResponse({ error: 'Unknown delivery' }, { status: 404 });
       }

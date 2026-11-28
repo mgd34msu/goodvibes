@@ -2,7 +2,7 @@ import { SESSION_KINDS, SESSION_SURFACE_KINDS, type DaemonRuntimeRouteContext } 
 import { jsonErrorResponse } from './error-response.js';
 import { isJsonRecord } from './route-helpers.js';
 import { toSharedSessionRecordResponse } from './runtime-session-routes.js';
-import { readProgramRegistration, registrantKeyOf } from './control-routes.js';
+import { readCallContext, readProgramRegistration, registrantKeyOf } from './control-routes.js';
 
 function isOneOf<T extends string>(accepted: readonly T[], value: string): value is T {
   return (accepted as readonly string[]).includes(value);
@@ -64,11 +64,12 @@ export async function handleRegisterSharedSession(
   // only one that may name it as a question's asker (inbox.post) or raise an approval into it.
   const principal = context.requestPrincipalId?.(req);
   const registeredBy = principal ? registrantKeyOf(principal, readProgramRegistration(req)) : undefined;
+  const project = readString(body.project) ?? readString(body.workingDirectory) ?? readCallContext(req)?.project;
   const result = await context.sessionBroker.register({
     ...(registeredBy ? { registeredBy } : {}),
     sessionId,
     ...(kindRaw ? { kind: kindRaw } : {}),
-    ...(readString(body.project) ? { project: readString(body.project) } : {}),
+    ...(project ? { project } : {}),
     ...(readString(body.title) ? { title: readString(body.title) } : {}),
     participant: {
       surfaceKind,

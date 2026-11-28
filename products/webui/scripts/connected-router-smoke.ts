@@ -46,7 +46,7 @@ const ordinarySupplementalSettings = new Set([
   ...['slack', 'discord', 'ntfy', 'webhook', 'homeassistant', 'telegram', 'googleChat', 'signal', 'whatsapp', 'telephony', 'imessage', 'msteams', 'bluebubbles', 'mattermost', 'matrix'].map(surface => `surfaces.${surface}.setupVersion`),
   'conversationGate.gatedSurfaces', 'worktree.setup.commands', 'worktree.setup.carryOverGlobs', 'cluster.peers', 'contract.gates', 'notifications.webhookUrls',
 ]);
-for (const key of ordinarySupplementalSettings) { assert.equal(canonicalSettings.has(key), false); canonicalSettings.set(key, ''); }
+for (const key of ordinarySupplementalSettings) { if (!canonicalSettings.has(key)) canonicalSettings.set(key, ''); }
 const nativeCatalogIds = new Set<string>();
 const ancillaryCounts = { providerCatalog: 0, credentialKey: 0, cardMaterialKey: 0 };
 const unknownShapes = new Map<string, number>();

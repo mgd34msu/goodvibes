@@ -290,7 +290,7 @@ export function registerAllTools(
     agentManager?: AgentManager | undefined;
     agentMessageBus: AgentMessageBus;
     /** Starts the contracts the agent tool and the workflow tool's `contract` definition hand work to; absent in a program that runs none. */
-    contractRunner?: Pick<ContractRunner, 'start' | 'list' | 'get'> | undefined;
+    contractRunner?: Pick<ContractRunner, 'start' | 'list' | 'get'> | null | undefined;
     /** The project a contract started by a tool works in. */
     projectRoot: string;
     /** Where this host keeps the journals of agents run here, when not in `projectRoot` (the daemon's records of the project). */
@@ -732,7 +732,7 @@ export function registerAllTools(
       messageBus: agentMessageBus,
       configManager: deps.configManager,
       ...(archetypeLoader ? { archetypeLoader } : {}),
-      contractRunner: deps.contractRunner,
+      ...(deps.contractRunner ? { contractRunner: deps.contractRunner } : {}),
       projectRoot: deps.projectRoot,
       ...(deps.agentJournalRoot ? { journalRoot: deps.agentJournalRoot } : {}),
       surfaceRoot: deps.surfaceRoot,
@@ -787,7 +787,7 @@ export function registerAllTools(
   );
   registerTool(
     createWorkflowTool(workflowServices, {
-      contractRunner: deps.contractRunner,
+      ...(deps.contractRunner ? { contractRunner: deps.contractRunner } : {}),
       projectRoot: deps.projectRoot,
       resolveSessionId: resolveContractSessionId,
       ...(deps.delegationAsk ? { delegationAsk: deps.delegationAsk } : {}),

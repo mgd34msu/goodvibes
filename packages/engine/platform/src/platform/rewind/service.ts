@@ -49,6 +49,8 @@ const CONVERSATION_UNDO_DEFAULT_LIFETIME = 'until 32 newer conversation rewinds 
 export interface UnifiedRewindServiceDeps {
   /** The workspace-checkpoint store port. Absent → files rewind is honestly unavailable. */
   readonly workspace?: RewindWorkspacePort | null;
+  /** Resolve the project-scoped workspace checkpoint store for a session/project on a multi-project daemon. */
+  readonly workspaceFor?: ((sessionId: string, project?: string) => RewindWorkspacePort | null | undefined) | null;
   /** The conversation store port. Absent → conversation rewind is honestly unavailable. */
   readonly conversation?: RewindConversationPort | null;
   /** Receipt event sink. Absent → no events emitted (a graceful degrade). */
@@ -67,6 +69,8 @@ export interface UnifiedRewindServiceDeps {
 export interface RewindApplyOptions {
   /** The single-use token `plan()` returned for this same anchor and scope; without it nothing runs. */
   readonly confirmToken?: string | undefined;
+  /** The project folder whose checkpoint store to resolve on a multi-project daemon. */
+  readonly project?: string | undefined;
 }
 
 function wants(scope: RewindScope, part: 'files' | 'conversation'): boolean {
@@ -74,6 +78,7 @@ function wants(scope: RewindScope, part: 'files' | 'conversation'): boolean {
 }
 
 interface ResolvedFiles {
+  readonly workspace: RewindWorkspacePort | null;
   readonly checkpoint: RewindCheckpointView | null;
   /** The anchor turn, when it has no checkpoint although the session has others. */
   readonly unmatchedTurn: string | null;
@@ -106,6 +111,7 @@ const WHOLE_WORKSPACE_WARNING = 'files rewind resets the whole workspace to the 
 
 export class UnifiedRewindService {
   private readonly workspace: RewindWorkspacePort | null;
+  private readonly workspaceFor: ((sessionId: string, project?: string) => RewindWorkspacePort | null | undefined) | null;
   private readonly conversation: RewindConversationPort | null;
   private readonly emitSink: RewindEventSink | null;
   private readonly now: () => number;
@@ -116,11 +122,16 @@ export class UnifiedRewindService {
 
   constructor(deps: UnifiedRewindServiceDeps = {}) {
     this.workspace = deps.workspace ?? null;
+    this.workspaceFor = deps.workspaceFor ?? null;
     this.conversation = deps.conversation ?? null;
     this.emitSink = deps.emit ?? null;
     this.now = deps.now ?? Date.now;
     this.tokens = deps.tokens ?? new ReviewTokenStore(this.now);
     this.anchorSurface = deps.anchorSurface ?? null;
+  }
+
+  private workspacePortFor(sessionId: string, project?: string): RewindWorkspacePort | null {
+    return this.workspaceFor?.(sessionId, project) ?? this.workspace;
   }
 
   /**
@@ -138,10 +149,10 @@ export class UnifiedRewindService {
   }
 
   /** Dry-run preview of a rewind + a single-use confirm token authorizing it. */
-  async plan(anchor: RewindAnchor, scope: RewindScope): Promise<RewindPlan> {
+  async plan(anchor: RewindAnchor, scope: RewindScope, opts?: { readonly project?: string | undefined }): Promise<RewindPlan> {
     const turnId = anchor.turnId ?? null;
     const warnings: string[] = [];
-    const resolved = wants(scope, 'files') ? await this.resolveFiles(anchor) : null;
+    const resolved = wants(scope, 'files') ? await this.resolveFiles(anchor, opts?.project) : null;
     const files = resolved ? await this.planFiles(resolved, warnings) : null;
     const counted = wants(scope, 'conversation') ? await this.planConversation(anchor, warnings) : null;
     const conversation = counted?.plan ?? null;
@@ -304,16 +315,17 @@ export class UnifiedRewindService {
    * turns, `unmatchedTurn` records that the file state at that turn cannot be
    * identified.
    */
-  private async resolveFiles(anchor: RewindAnchor): Promise<ResolvedFiles> {
-    if (!this.workspace) return { checkpoint: null, unmatchedTurn: null };
-    const list = await this.workspace.list({ sessionId: anchor.sessionId });
-    if (list.length === 0) return { checkpoint: null, unmatchedTurn: null };
+  private async resolveFiles(anchor: RewindAnchor, project?: string): Promise<ResolvedFiles> {
+    const workspace = this.workspacePortFor(anchor.sessionId, project);
+    if (!workspace) return { workspace: null, checkpoint: null, unmatchedTurn: null };
+    const list = await workspace.list({ sessionId: anchor.sessionId });
+    if (list.length === 0) return { workspace, checkpoint: null, unmatchedTurn: null };
     if (anchor.turnId !== undefined) {
       const checkpoint = list.find((c) => c.turnId === anchor.turnId) ?? null;
-      return { checkpoint, unmatchedTurn: checkpoint ? null : anchor.turnId };
+      return { workspace, checkpoint, unmatchedTurn: checkpoint ? null : anchor.turnId };
     }
     // No turn anchor → the session's most recent checkpoint (do not assume list order).
-    return { checkpoint: [...list].sort((a, b) => b.createdAt - a.createdAt)[0] ?? null, unmatchedTurn: null };
+    return { workspace, checkpoint: [...list].sort((a, b) => b.createdAt - a.createdAt)[0] ?? null, unmatchedTurn: null };
   }
 
   /** The conversation's revision now, or why it cannot be rewound now. */
@@ -336,7 +348,7 @@ export class UnifiedRewindService {
   }
 
   private async planFiles(resolved: ResolvedFiles, warnings: string[]): Promise<RewindPlanFiles> {
-    if (!this.workspace) {
+    if (!resolved.workspace) {
       warnings.push('files rewind unavailable: no workspace checkpoint store is wired on this runtime');
       return { available: false, checkpointId: null, checkpointLabel: null, affectedFileCount: 0 };
     }
@@ -346,7 +358,7 @@ export class UnifiedRewindService {
       return { available: false, checkpointId: null, checkpointLabel: null, affectedFileCount: 0 };
     }
     warnings.push(WHOLE_WORKSPACE_WARNING);
-    const diff = await this.workspace.diff(checkpoint.id);
+    const diff = await resolved.workspace.diff(checkpoint.id);
     return {
       available: true,
       checkpointId: checkpoint.id,
@@ -378,7 +390,7 @@ export class UnifiedRewindService {
     warnings: string[],
   ): Promise<{ files: RewindReceiptFiles; undoFiles: RewindUndo['files'] }> {
     const checkpoint = resolved.checkpoint;
-    if (!this.workspace || !checkpoint) {
+    if (!resolved.workspace || !checkpoint) {
       warnings.push('files rewind skipped: no workspace checkpoint available for this anchor');
       return {
         files: { restored: false, checkpointId: checkpoint?.id ?? null, safetyCheckpointId: null, restoredFileCount: 0, removedFileCount: 0 },
@@ -387,7 +399,7 @@ export class UnifiedRewindService {
     }
     // safetyCheckpoint: true records the pre-restore state, the undo point that
     // makes this rewind reversible (restore that checkpoint to reverse it).
-    const result = await this.workspace.restore(checkpoint.id, { safetyCheckpoint: true });
+    const result = await resolved.workspace.restore(checkpoint.id, { safetyCheckpoint: true });
     warnings.push(WHOLE_WORKSPACE_WARNING);
     // A restore that could not apply every path is not a completed rewind: say
     // so, and keep the undo point so the partial state can be reversed.

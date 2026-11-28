@@ -22,9 +22,8 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { rmSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { resolveGoodVibesDaemonHome } from '../config/goodvibes-home.js';
+import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '../config/goodvibes-home.js';
 
 /**
  * The owner's programs that register: the terminal app, the Agent, and the daemon's own program. Each is the owner's
@@ -68,7 +67,7 @@ const byHome = new Map<string, ProgramRegistrations>();
 
 /** This daemon's registrations (its own home's). */
 export function daemonProgramRegistrations(): ProgramRegistrations {
-  return ProgramRegistrations.forDaemonHome(resolveGoodVibesDaemonHome(homedir()));
+  return ProgramRegistrations.forDaemonHome(resolveGoodVibesDaemonHome(resolveGoodVibesHome()));
 }
 
 function hashOf(key: string): string {

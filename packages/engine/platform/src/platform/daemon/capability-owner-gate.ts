@@ -92,12 +92,10 @@ function callerName(runsAs: GateCaller | undefined, runtime: GateRuntime, _users
     return `you, signed in as ${principalId}`;
   }
   if (principalId === LOCAL_OWNER_PRINCIPAL) {
-    // A command line (`do`): decided whoever typed it, since anything that drives a terminal can type there.
     if (runsAs?.commandLine === true) return 'a do command typed on this machine';
     if (runsAs?.registration) return 'one of your GoodVibes programs on this machine';
-    // The operator token alone is held by every command line and script of the account: never "you".
-    return runsAs?.credentialKind === 'local' ? 'a program or script on this machine using your operator token (not one of your verified programs)'
-      : 'a program or script using your operator token from another machine';
+    return runsAs?.credentialKind === 'local' ? 'a local program or script on this machine'
+      : 'a program or script using your operator token';
   }
   const deviceId = pairingTokenIdOfPrincipal(principalId);
   if (deviceId !== undefined) {
@@ -335,7 +333,7 @@ export function createCapabilityOwnerGate(runtime: GateRuntime, options: { reado
     const raisedId = raisedFor.get(metadata);
     if (!result.approved) {
       // Refused with no question put (plan mode, a rule): said as what refused it, never as the owner's No.
-      const why = raisedId === undefined && result.reasonCode === 'plan-mode' ? 'plan mode is on, so nothing that changes anything runs until the owner leaves it'
+      const why = raisedId === undefined && result.reasonCode === 'plan_mode' ? 'plan mode is on, so nothing that changes anything runs until the owner leaves it'
         : raisedId === undefined ? 'the permission mode or a rule in force refused it' : 'the owner did not approve it';
       return { approved: false, reason: result.detail ?? result.userReason ?? why };
     }

@@ -17,7 +17,7 @@
  * asked again). Read once per process; written only when a change is found or
  * answered, never per turn.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
@@ -66,7 +66,21 @@ function readStored(path: string): Record<string, ModelPriceChange> {
  * the process (the daemon's own and each hosted session's), so a change one
  * records or one answers is the one the others ask about.
  */
-const loaded = new Map<string, Record<string, ModelPriceChange>>();
+interface CachedChanges {
+  stamp: string | null;
+  changes: Record<string, ModelPriceChange>;
+}
+
+const loaded = new Map<string, CachedChanges>();
+
+function fileStamp(path: string): string | null {
+  try {
+    const s = statSync(path);
+    return `${s.mtimeMs}:${s.size}:${s.ino}`;
+  } catch {
+    return null;
+  }
+}
 
 /** The price changes this machine recorded, by registry key. */
 export class ModelPriceChanges {
@@ -76,16 +90,24 @@ export class ModelPriceChanges {
   private path(): string { return join(this.root(), MODEL_PRICE_CHANGES_FILE); }
   private all(): Record<string, ModelPriceChange> {
     const path = this.path();
-    let changes = loaded.get(path);
-    if (!changes) { changes = readStored(path); loaded.set(path, changes); }
+    const stamp = fileStamp(path);
+    const cached = loaded.get(path);
+    if (cached && cached.stamp === stamp) return cached.changes;
+    const changes = readStored(path);
+    loaded.set(path, { stamp, changes });
     return changes;
   }
-  private save(): void {
-    try { writeJsonFileAtomic(this.path(), { version: 1, changes: this.all() } satisfies StoredChanges); }
-    catch (error) { logger.warn('[model-price-changes] the price change could not be saved; it is asked about again after a restart', { error: summarizeError(error) }); }
+  private save(next: Record<string, ModelPriceChange>): void {
+    const path = this.path();
+    try {
+      writeJsonFileAtomic(path, { version: 1, changes: next } satisfies StoredChanges);
+      loaded.set(path, { stamp: fileStamp(path), changes: next });
+    } catch (error) {
+      logger.warn('[model-price-changes] the price change could not be saved; it is asked about again after a restart', { error: summarizeError(error) });
+    }
   }
 
-  /** A change not yet answered for this model, or undefined. A memory read. */
+  /** A change not yet answered for this model, or undefined. */
   pending(registryKey: string): ModelPriceChange | undefined {
     const change = this.all()[registryKey];
     return change !== undefined && change.acceptedAt === undefined ? change : undefined;
@@ -96,15 +118,16 @@ export class ModelPriceChanges {
 
   /** Record a new move away from free; a later move replaces an earlier one and is asked about again. */
   record(registryKey: string, change: Omit<ModelPriceChange, 'acceptedAt'>): void {
-    this.all()[registryKey] = { ...change };
-    this.save();
+    const next = { ...this.all(), [registryKey]: { ...change } };
+    this.save(next);
   }
 
   /** The person said to keep using it: not asked again for this change. */
   accept(registryKey: string, now = Date.now()): void {
-    const change = this.all()[registryKey];
+    const current = this.all();
+    const change = current[registryKey];
     if (change === undefined || change.acceptedAt !== undefined) return;
-    this.all()[registryKey] = { ...change, acceptedAt: now };
-    this.save();
+    const next = { ...current, [registryKey]: { ...change, acceptedAt: now } };
+    this.save(next);
   }
 }

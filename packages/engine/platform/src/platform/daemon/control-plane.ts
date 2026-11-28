@@ -2121,7 +2121,8 @@ export class DaemonControlPlaneHelper {
     // any. The gateway REST arm serves only verbs with a handler, so this
     // request cannot come back to this method; a path nothing serves answers
     // the fixed 501 NOT_INVOKABLE.
-    const resolvedPath = resolveGatewayPathTemplate(descriptor.http.path, input.query, input.body);
+    const http = descriptor.http;
+    const resolvedPath = resolveGatewayPathTemplate(http.path, input.query, input.body);
     if (!resolvedPath.path) {
       return {
         status: 400,
@@ -2132,21 +2133,22 @@ export class DaemonControlPlaneHelper {
         },
       };
     }
+    const targetPath = resolvedPath.path;
     // A GET or DELETE route reads its inputs from the query: a call by method id that sends them in its body (as every
     // method call does) has its plain fields carried there, the query's own winning, so nothing it named is dropped
     // (a planning read's project, checked above as the body's `workingDirectory`).
-    const bodyless = descriptor.http.method === 'GET' || descriptor.http.method === 'DELETE';
+    const bodyless = http.method === 'GET' || http.method === 'DELETE';
     const bodyFields = bodyless && input.body !== null && typeof input.body === 'object' && !Array.isArray(input.body)
       ? Object.fromEntries(Object.entries(input.body as Record<string, unknown>).filter(([, value]) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'))
       : {};
     const served = await asCaller(() => this.invokeWebSocketControlPlaneCall({
       authToken: input.authToken,
       signal: input.signal,
-      method: descriptor.http.method,
-      path: resolvedPath.path,
+      method: http.method,
+      path: targetPath,
       query: { ...bodyFields, ...(input.query ?? {}) } as GatewayMethodCallInput['query'],
       caller,
-      body: descriptor.http.method === 'GET' || descriptor.http.method === 'DELETE' ? undefined : input.body,
+      body: http.method === 'GET' || http.method === 'DELETE' ? undefined : input.body,
       context: {
         principalKind: context?.principalKind,
         admin: context?.admin,

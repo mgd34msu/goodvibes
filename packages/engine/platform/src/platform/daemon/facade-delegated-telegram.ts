@@ -101,8 +101,8 @@ export function composeDelegatedTelegramIntake(runtime: ResolvedDaemonFacadeRunt
   const host = new DelegatedTelegramIntake({ broker: runtime.sessionBroker, approvals: runtime.approvalBroker, routes: runtime.routeBindings,
     accounts, workspaceRoot: runtime.runtimeServices.workingDirectory,
     beforeReviewOwnerWrite: () => runtime.runtimeServices.nativeDataWriter?.declare('delegated-review-owner-v2'),
-    selectionPath: runtime.runtimeServices.shellPaths.resolveProjectPath('goodvibes', 'channels', 'telegram-delegated-selection.json'),
-    receiptPath: runtime.runtimeServices.shellPaths.resolveProjectPath('goodvibes', 'channels', 'telegram-delegated-review.json'),
+    selectionPath: runtime.runtimeServices.shellPaths.resolveUserPath('goodvibes', 'channels', 'telegram-delegated-selection.json'),
+    receiptPath: runtime.runtimeServices.shellPaths.resolveUserPath('goodvibes', 'channels', 'telegram-delegated-review.json'),
     // The owner is told in their inbox when a message waits for them to confirm the chat again after a restart.
     notices: runtime.runtimeServices.ownerInbox,
   });

@@ -19,7 +19,7 @@ let loaded: CapabilityCatalog | undefined;
  * its input (`{input}` blanks are earlier answers) and how its answer becomes rows; or why only a terminal reads it.
  */
 export type DaemonListOperator =
-  | { readonly method: string; readonly input: Readonly<Record<string, string>>; readonly rows: Readonly<Record<string, unknown>> }
+  | { readonly method: string; readonly input: Readonly<Record<string, unknown>>; readonly rows: Readonly<Record<string, unknown>> }
   | { readonly terminalOnly: string };
 
 interface DescribedData {
@@ -32,7 +32,7 @@ let described: Promise<DescribedData> | undefined;
 function describedData(): Promise<DescribedData> {
   described ??= (async () => {
     try {
-      const module = await import('@goodvibes/engine/contracts/command-actions.json') as { readonly default?: DescribedData } & DescribedData;
+      const module = await import('@goodvibes/engine/contracts/command-actions.json') as unknown as { readonly default?: DescribedData } & DescribedData;
       return module.default ?? module;
     } catch {
       // A build without the generated data still finds and runs every moved capability.

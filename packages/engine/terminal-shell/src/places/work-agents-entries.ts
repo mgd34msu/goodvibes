@@ -728,8 +728,8 @@ export const WORK_AGENT_ACTIONS: readonly PlaceAction<WorkAgentItem>[] = [
   // Each act sits on the list it belongs to, never above every list. A media job a provider was still making when its
   // answer came back is a daemon job: collected from Daemon tasks.
   { key: 'J', id: 'collect-media-job', list: 'daemon-tasks', whole: true, capability: 'media.collect', label: 'collect a media job' },
-  // The Agent's briefing of its own state, on Your agents (the terminal app keeps none: the capability refuses there).
-  { key: 'O', id: 'briefing', list: 'agents', whole: true, capability: 'work.brief', label: 'your briefing', programs: ['agent'] },
+  // The Agent's briefing of its own state, on the Work tab (visible in Agent; the terminal app keeps none).
+  { key: 'O', id: 'briefing', list: 'work', whole: true, capability: 'work.brief', label: 'your briefing', programs: ['agent'] },
   // Web research: a question or a page goes to the Agent's conversation; runs, the queue and reports are the daemon's.
   { key: 'Q', id: 'research-question', list: 'research', whole: true, capability: 'research.ask', label: 'research a question', programs: ['agent'] },
   { key: 'W', id: 'look-at-page', list: 'research', whole: true, capability: 'research.inspect', label: 'look at a web page', programs: ['agent'] },

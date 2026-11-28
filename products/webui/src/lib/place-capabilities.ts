@@ -247,8 +247,9 @@ export function opensForm(capability: PlaceCapability, values: ActionValues, alw
  * caller's folder, `workingDirectory`). Throws the daemon's refusal.
  */
 export async function runPlaceCapability(id: string, values: ActionValues, project?: string | undefined): Promise<CapabilityAnswer> {
-  // "Every project" names no project (an act on one project's things then asks for one).
-  return answerOf(await invokeOwnerMethod('capabilities.run', { id, inputs: values, ...(project && project.startsWith('/') ? { workingDirectory: project } : {}) }));
+  // "Every project" / "No project" sentinel values name no project (an act on one project's things then asks for one).
+  const isNamedProject = Boolean(project) && project !== '*every-project*' && project !== '*no-project*';
+  return answerOf(await invokeOwnerMethod('capabilities.run', { id, inputs: values, ...(isNamedProject ? { workingDirectory: project } : {}) }));
 }
 
 /**

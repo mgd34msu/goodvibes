@@ -16,7 +16,7 @@ export function sessionsPlaceHostOf(ctx: CommandContext): SessionsPlaceHost {
     sessionManager: () => {
       try { return requireSessionManager(ctx); } catch { return null; }
     },
-    sessionsDir: () => ctx.workspace.surface?.sessionsDir,
+    sessionsDir: () => ctx.session.surface?.sessionsDir,
     current: () => ({
       id: ctx.session.runtime.sessionId,
       title: ctx.session.conversationManager.title,

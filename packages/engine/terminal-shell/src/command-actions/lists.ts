@@ -44,7 +44,7 @@ export interface NamedList<Ctx> {
     | {
         readonly method: string;
         /** The method's input; `{input}` blanks in a value are the earlier answers. */
-        readonly input: Readonly<Record<string, string>>;
+        readonly input: Readonly<Record<string, unknown>>;
         readonly rows: ListRowsFromOutput;
       }
     | { readonly terminalOnly: string };
@@ -89,8 +89,14 @@ export function rowsFromOutput(spec: ListRowsFromOutput, output: unknown, earlie
 }
 
 /** The input an operator method is called with for a list, its blanks filled. */
-export function listOperatorInput(input: Readonly<Record<string, string>>, earlier: Readonly<Record<string, string>>): Record<string, string> {
-  return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, fillBlanks(value, earlier)]));
+export function listOperatorInput(
+  input: Readonly<Record<string, string | readonly string[]>>,
+  earlier: Readonly<Record<string, string>>,
+): Record<string, string | string[]> {
+  return Object.fromEntries(Object.entries(input).map(([key, value]) => [
+    key,
+    Array.isArray(value) ? value.map((entry) => fillBlanks(entry, earlier)) : fillBlanks(value as string, earlier),
+  ]));
 }
 
 const lists = new Map<string, NamedList<never>>();

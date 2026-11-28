@@ -283,10 +283,11 @@ function unansweredOutcome(control: DaemonServiceControl, serviceName: string, s
 }
 
 /** A watch on one directory's entries; `close` ends it. */
-export type DirectoryWatch = (directory: string, onChange: (filename: string | null) => void) => { close(): void };
+export type DirectoryWatch = (directory: string, onChange: (filename: string | null) => void, onError?: (error: unknown) => void) => { close(): void };
 
-const watchDirectory: DirectoryWatch = (directory, onChange) => {
+const watchDirectory: DirectoryWatch = (directory, onChange, onError) => {
   const watcher = watch(directory, { persistent: false }, (_event, filename) => onChange(filename === null ? null : String(filename)));
+  watcher.on('error', (error) => onError?.(error));
   return { close: () => watcher.close() };
 };
 
@@ -358,6 +359,9 @@ export function waitForStartingDaemon(options: WaitForStartingDaemonOptions): Pr
         // The marker is replaced by rename from `<name>.tmp-...`, so the directory is
         // watched; some platforms name only the staging file in the event.
         if (filename === null || filename === name || filename.startsWith(`${name}.`)) check();
+      }, (error) => {
+        logger.warn('[startup] the daemon\'s lifecycle marker watch errored; it will connect on a later request', { error: summarizeError(error) });
+        finish('aborted');
       });
     } catch (error) {
       logger.warn('[startup] the daemon\'s lifecycle marker cannot be watched; it is connected once it answers a later request', { error: summarizeError(error) });

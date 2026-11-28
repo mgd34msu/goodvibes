@@ -15,10 +15,11 @@ export type { DocumentOpsSources, StoreRead } from '@goodvibes/engine/terminal-s
 export function readDocumentOpsSources(context: CommandContext): DocumentOpsSources {
   const shellPaths = context.workspace?.shellPaths;
   const store = context.platform.artifactStore;
+  const listArtifacts = store?.list?.bind(store);
   return {
     documents: readPacketDocuments(shellPaths ? () => AgentDocumentRegistry.fromShellPaths(shellPaths).list() : undefined),
-    artifacts: readPacketArtifacts(store?.list ? { list: (limit?: number) => store.list(limit) } : undefined),
-    artifactsListable: Boolean(store?.list),
+    artifacts: readPacketArtifacts(listArtifacts ? { list: (limit?: number) => listArtifacts(limit) } : undefined),
+    artifactsListable: Boolean(listArtifacts),
   };
 }
 

@@ -227,7 +227,7 @@ export const AGENTS_HOST: DaemonDefinition = {
   sentence: '{agent} starts as a long-running session in the folder given; it is listed in the Sessions place as a shared session, where you send it work and close it.',
   // Another coding agent, long-running in that folder, that runs its own tools under its own rules, not this gate's:
   // it loosens a protection.
-  done: '', touches: 'this-machine', lasts: 'not-a-change', risk: 'loosens-a-protection', example: { agent: 'claude-code' },
+  done: '', touches: 'this-machine', lasts: 'not-a-change', risk: 'loosens-a-protection', ownerOnly: { reason: 'hosting a coding agent starts an external agent outside GoodVibes\' permission gate', instead: 'Ask the owner to host it in Work and agents, Coding agents.' }, example: { agent: 'claude-code' },
   async run(values, _services, caller) {
     const cwd = values.directory || caller.workingDirectory;
     if (!cwd) throw new CapabilityRefusal('Nothing was started: no folder was given and the caller named none.', 'Give the folder it works in.');

@@ -584,7 +584,7 @@ async function agentToolDefinitions(): Promise<readonly ToolDefinitionLike[]> {
   mkdirSync(workingDir, { recursive: true });
   mkdirSync(configDir, { recursive: true });
   const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir, homeDir: SCRATCH_HOME, configDir });
-  await prepareConfiguredProjectContext(configManager, workingDir, 'knowledge-agent.sqlite', { activate: true });
+  await prepareConfiguredProjectContext(configManager, workingDir, undefined, { activate: true, inDaemonStateFolder: true });
   const services = await createRuntimeServices({ modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), configManager, workingDir, homeDirectory: SCRATCH_HOME });
   const { toolRegistry } = composeAgentToolRegistry({
     services, configManager, homeDirectory: SCRATCH_HOME, resolveSessionId: () => 'llms-full',
@@ -1044,11 +1044,10 @@ const ROUTE_CODE_MEANINGS: Readonly<Record<string, string>> = {
   APPROVED_NOT_APPLIED: 'The owner approved the change, but applying it failed; the approval stays recorded and the message says why; fix the cause and make the change again',
   REMEMBER_NOT_SAVED: 'The answer asked to be remembered, but its rule could not be saved; nothing was decided and the ask is still waiting; answer it again, or without remembering',
   NOT_APPLIED: 'An approval answer relayed from another machine of the group could not be applied; the message says why; read the approval again',
-  REROOT_FAILED: 'The new working directory could not be saved to the daemon settings; nothing changed',
   SET_MODEL_FAILED: 'The model could not be made current; the message is the provider registry\'s reason',
   UNTRUSTED_CONTENT_BLOCKED_EFFECT: 'This turn read content from a web page, so a browser action with an outward effect is refused',
   UNTRUSTED_CONTENT_DERIVED: 'The message would send content derived from untrusted text, which needs the owner',
-  WORKSPACE_BUSY: 'The daemon is already moving to another working directory; retry after the Retry-After seconds',
+  WORK_PLAN_REFUSED: 'The work plan edit or approval was refused because the plan is no longer held or the requested step change is invalid',
 };
 
 /** Modules outside the route folders whose refusals a route answers as they are, with the status it answers them with. */

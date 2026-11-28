@@ -7,7 +7,7 @@ import {
   handleSharedSessionLifecycle,
 } from './runtime-session-lifecycle-routes.js';
 import { withAdmin } from './auth-helpers.js';
-import { readProgramRegistration, registrantKeyOf } from './control-routes.js';
+import { readCallContext, readProgramRegistration, registrantKeyOf } from './control-routes.js';
 import { jsonErrorResponse } from './error-response.js';
 import { agentRetrySpawnInput } from './tasks.js';
 import { EngineErrorCodes, isOperationKey, OPERATION_KEY_RULE } from '@goodvibes/engine/errors';
@@ -403,7 +403,9 @@ async function handleCreateSharedSession(context: DaemonRuntimeRouteContext, req
   const principal = context.requestPrincipalId?.(req);
   const callerMetadata = Object.fromEntries(Object.entries(typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {})
     .filter(([key]) => key !== 'registeredBy'));
-  const project = typeof body.workingDirectory === 'string' && body.workingDirectory.trim() ? body.workingDirectory.trim() : undefined;
+  const project = (typeof body.workingDirectory === 'string' && body.workingDirectory.trim() ? body.workingDirectory.trim() : undefined)
+    ?? (typeof body.project === 'string' && body.project.trim() ? body.project.trim() : undefined)
+    ?? readCallContext(req)?.project;
   // A caller below an admin never picks the id: an id already taken would answer with that session, whoever's it is.
   const chosenId = typeof body.id === 'string' && !belowAdmin(context, req) ? body.id : undefined;
   const session = await context.sessionBroker.createSession({
@@ -509,10 +511,11 @@ async function handlePostTask(context: DaemonRuntimeRouteContext, req: Request):
     }, { status: 202 }));
   }
 
+  const workingDirectory = input.workingDirectory ?? readCallContext(req)?.project;
   const spawnResult = context.trySpawnAgent({
     mode: 'spawn',
     task: input.task,
-    ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {}),
+    ...(workingDirectory ? { workingDirectory } : {}),
     ...spawnRoutingFields(input),
   }, 'DaemonServer');
   if (spawnResult instanceof Response) return spawnResult;

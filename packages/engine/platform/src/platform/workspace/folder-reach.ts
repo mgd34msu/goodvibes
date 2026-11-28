@@ -7,6 +7,7 @@
  * project. The same holds when the folder that held it is an empty mount point (a disk's mount folder left behind
  * empty when the disk is unmounted).
  */
+import { randomUUID } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '../config/goodvibes-home.js';
@@ -75,7 +76,7 @@ function mountPointsNow(): ReadonlySet<string> | undefined {
  * this process first needs it, and has no clock. No other file and no record of the project's registration is changed.
  */
 const PROJECT_MOUNTS_FILE = 'project-mounts.json';
-let projectMountsLoaded = false;
+let projectMountsLoadedPath: string | undefined;
 /** The projects whose mount this process has already put in the file (or found there). */
 const rememberedRoots = new Map<string, string>();
 
@@ -92,16 +93,17 @@ function readProjectMounts(): Record<string, string> {
 function writeProjectMounts(mounts: Record<string, string>): void {
   try {
     const path = projectMountsPath();
-    const temporary = `${path}.tmp-${process.pid}`;
+    const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
     writeFileSync(temporary, `${JSON.stringify({ version: 1, mounts }, null, 2)}\n`, { mode: 0o600 });
     renameSync(temporary, path);
   } catch { /* the memory is a help: a write that cannot be made leaves things as they were */ }
 }
 
-/** Reads the file once: the mount point of each project still registered is known before its folder is first seen. */
+/** Reads the file once per daemon home: the mount point of each project still registered is known before its folder is first seen. */
 function loadProjectMounts(): void {
-  if (projectMountsLoaded) return;
-  projectMountsLoaded = true;
+  const path = projectMountsPath();
+  if (projectMountsLoadedPath === path) return;
+  projectMountsLoadedPath = path;
   const registered = new Set(homeRegisteredRoots());
   for (const [root, mountPoint] of Object.entries(readProjectMounts())) if (registered.has(root)) seenMountPoints.add(mountPoint);
 }

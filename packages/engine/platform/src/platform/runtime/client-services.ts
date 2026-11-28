@@ -315,7 +315,9 @@ export type ClientOnlyServiceMember =
  * carry, that pin fails and the field has to be named in
  * {@link ClientOnlyServiceMember} deliberately rather than by accident.
  */
-export type ClientRuntimeServicesFromHost = Omit<ClientRuntimeServices, ClientOnlyServiceMember>;
+export type ClientRuntimeServicesFromHost = Omit<ClientRuntimeServices, ClientOnlyServiceMember | 'contractRunner'> & {
+  readonly contractRunner: ContractRunner | null;
+};
 
 export interface ClientRuntimeServicesOptions {
   /** Same-project nested runtime borrows the composing host's actual graph

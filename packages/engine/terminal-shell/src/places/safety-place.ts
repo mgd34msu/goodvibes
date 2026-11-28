@@ -371,9 +371,6 @@ export const SAFETY_PLACE = definePlace<SafetyItem>({
     { key: 'n', id: 'add-user', list: 'users', whole: true, capability: 'local-auth.add', label: 'let someone sign in' },
     { key: 'p', id: 'change-password', list: 'users', capability: 'local-auth.password', label: 'change password', fill: { user: 'fill' } },
     { key: 'x', id: 'remove-user', list: 'users', capability: 'local-auth.remove', label: 'stop them signing in', fill: { user: 'fill' } },
-    // The projects of yours a member may work in (builtin/devices-projects.ts): with none they act on shared things only.
-    { key: 'w', id: 'give-member-project', list: 'users', capability: 'devices.give-project', label: 'let them work in a project', fill: { who: 'fill' }, form: true },
-    { key: 'W', id: 'take-member-project', list: 'users', capability: 'devices.take-project', label: 'stop them working in a project', fill: { who: 'fill' }, form: true },
     { key: 'x', id: 'sign-out', list: 'signed-in', capability: 'local-auth.sign-out', label: 'sign out', fill: { session: 'fill' } },
     // Who is who.
     { key: 'n', id: 'add-principal', list: 'people', whole: true, capability: 'principals.create', label: 'add' },
@@ -413,8 +410,17 @@ export const SAFETY_PLACE = definePlace<SafetyItem>({
     { key: 'o', id: 'read-sandbox', list: 'sandbox', whole: true, capability: 'security.read-sandbox', label: 'read a saved record', programs: ['tui'] },
   ],
   count: (lists) => {
-    const wrong = (lists.tokens ?? []).filter((item) => item.state !== 'ok').length + (lists.policy ?? []).filter((item) => item.state === 'problem').length;
-    if (wrong > 0) return { count: wrong, words: `${wrong} device token${wrong === 1 ? '' : 's'} need${wrong === 1 ? 's' : ''} a look`, tone: 'wrong' };
+    const wrongTokens = (lists.tokens ?? []).filter((item) => item.state !== 'ok').length;
+    const wrongPolicy = (lists.policy ?? []).filter((item) => item.state === 'problem').length;
+    const wrong = wrongTokens + wrongPolicy;
+    if (wrong > 0) {
+      const words = wrongTokens > 0 && wrongPolicy > 0
+        ? `${wrong} safety items need a look`
+        : wrongTokens > 0
+          ? `${wrongTokens} device token${wrongTokens === 1 ? '' : 's'} need${wrongTokens === 1 ? 's' : ''} a look`
+          : `${wrongPolicy} policy issue${wrongPolicy === 1 ? '' : 's'} need${wrongPolicy === 1 ? 's' : ''} a look`;
+      return { count: wrong, words, tone: 'wrong' };
+    }
     const waiting = (lists.secrets ?? []).filter((item) => item.state === 'waiting').length + (lists.folder ?? []).filter((item) => item.state === 'undecided').length;
     return waiting > 0 ? { count: waiting, words: `${waiting} wait${waiting === 1 ? 's' : ''} for you`, tone: 'waiting' } : undefined;
   },

@@ -51,7 +51,7 @@ export type {
 } from './approval-updates.js';
 
 export { createDaemonConfigClient, isDaemonOwnedConfigKey } from './config-client.js';
-export type { DaemonConfigClient, PreparedDaemonSettingsClient, PreparedDaemonSettingsImportClient } from './config-client.js';
+export type { DaemonConfigClient, PreparedDaemonSettingsClient } from './config-client.js';
 export { captureRemoteSettingsPrecondition } from '../../config/settings-precondition-client.js';
 export type {
   RemoteSettingsPrecondition,

@@ -536,7 +536,7 @@ const EVERY_PROGRAM_ACTIONS: readonly PlaceCapabilityAction<MemoryStoreItem>[] =
 /** The controls of the Agent's own lists (and "make a persona" on a note) are drawn only where the lists are. */
 const AGENT_LISTS: ReadonlySet<string> = new Set(['personas', 'agent-homes', 'starters']);
 export const MEMORY_STORE_ACTIONS: readonly PlaceAction<MemoryStoreItem>[] = EVERY_PROGRAM_ACTIONS.map((action) => (
-  AGENT_LISTS.has(action.list) || action.id === 'note-to-persona' ? { ...action, programs: AGENT_HAS } : action
+  (action.list !== undefined && AGENT_LISTS.has(action.list)) || action.id === 'note-to-persona' ? { ...action, programs: AGENT_HAS } : action
 ));
 
 /** What the terminal side of these lists reads (memory-stores-lists.ts: the live lists a form's inputs choose from). */

@@ -78,7 +78,7 @@ export function JudgmentModelField({
         />
         <Button
           size="sm"
-          disabled={saving || !/^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}$/.test(custom)}
+          disabled={saving || !/^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$/.test(custom)}
           onClick={() => void save(custom)}
         >
           Save model

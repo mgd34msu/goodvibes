@@ -2,6 +2,7 @@
  * memory-author.ts, who wrote a memory record (memory-store.ts `MemoryRecord.author`), kept apart from the store so a
  * reader (the recall contract, a program's prompt, a place's list) needs nothing of the store's to tell it.
  */
+import { noteExposure } from '../security/conversation-exposure.js';
 
 /**
  * Who wrote a memory record: `owner` (their own press or typed words), `owner-model` (their model in their own turn) or
@@ -25,8 +26,6 @@ export interface MemoryAuthor {
    */
   readonly madeBy?: string | undefined;
 }
-
-import { noteExposure } from '../security/conversation-exposure.js';
 
 /**
  * An author as a store kept it (a JSON object). Absent or null: none (the owner's, a record from before authors were

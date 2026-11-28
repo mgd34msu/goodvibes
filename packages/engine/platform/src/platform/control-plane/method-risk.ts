@@ -337,8 +337,8 @@ export const OWNER_ONLY_CAPABILITIES: Readonly<Record<string, OwnerOnlyArea>> = 
   'principals.update': 'sign-ins', 'principals.delete': 'sign-ins',
   // Credentials and pairings.
   'devices.migrate-shared': 'devices', 'devices.revoke-shared': 'devices', 'devices.relay-revoke': 'devices',
-  // Who works where, and who reaches the owner's shared things.
-  'devices.give-project': 'devices', 'devices.give-shared': 'devices', 'workspaces.register': 'projects', 'workspaces.unregister': 'projects',
+  // Projects and workspaces.
+  'workspaces.register': 'projects', 'workspaces.unregister': 'projects',
   'chats.project': 'projects', 'chats.automatic-folder': 'projects',
   // Secrets: written, linked, trusted, removed or read out.
   'secrets.set': 'secrets', 'secrets.link': 'secrets', 'secrets.trust': 'secrets', 'secrets.delete': 'secrets',
@@ -393,19 +393,19 @@ export type OwnerOnlyArea = 'sign-ins' | 'devices' | 'projects' | 'secrets' | 'm
 
 /** The words of where the owner does it, per area. */
 export const OWNER_ONLY_WHERE: Readonly<Record<OwnerOnlyArea, string>> = {
-  'sign-ins': 'Sign-ins in System, signed in to the web UI as the owner or in the terminal app or the Agent on the owner\'s computer',
-  devices: 'Devices and network, signed in to the web UI as the owner or in the terminal app or the Agent on the owner\'s computer',
-  projects: 'Devices and network or the project chooser, signed in to the web UI as the owner or in the terminal app or the Agent on the owner\'s computer',
-  secrets: 'Secrets and the place of the account it belongs to, signed in to the web UI as the owner or in the terminal app or the Agent on the owner\'s computer',
-  money: 'the Money place, signed in to the web UI as the owner or in the terminal app or the Agent on the owner\'s computer',
-  permissions: 'Permissions and safety, signed in to the web UI as the owner or in the terminal app or the Agent on the owner\'s computer',
-  settings: 'Settings, signed in to the web UI as the owner or in the terminal app or the Agent on the owner\'s computer',
-  memory: 'Memory and About you, signed in to the web UI as the owner or in the terminal app or the Agent on the owner\'s computer',
-  tools: 'Tools and skills, signed in to the web UI as the owner or in the terminal app or the Agent on the owner\'s computer',
-  group: 'Devices and network (the machine group), signed in to the web UI as the owner or in the terminal app or the Agent on the owner\'s computer',
-  daemon: 'System, signed in to the web UI as the owner or in the terminal app or the Agent on the owner\'s computer',
-  work: 'Work, signed in to the web UI as the owner or in the terminal app or the Agent on the owner\'s computer',
-  channels: 'Mail calendar and channels, signed in to the web UI as the owner or in the terminal app or the Agent on the owner\'s computer',
+  'sign-ins': 'Sign-ins in System, in the web UI, terminal app, or Agent',
+  devices: 'Devices and network, in the web UI, terminal app, or Agent',
+  projects: 'Devices and network or the project chooser, in the web UI, terminal app, or Agent',
+  secrets: 'Secrets, in the web UI, terminal app, or Agent',
+  money: 'Money, in the web UI, terminal app, or Agent',
+  permissions: 'Permissions and safety, in the web UI, terminal app, or Agent',
+  settings: 'Settings, in the web UI, terminal app, or Agent',
+  memory: 'Memory and About you, in the web UI, terminal app, or Agent',
+  tools: 'Tools and skills, in the web UI, terminal app, or Agent',
+  group: 'Devices and network (Machine group), in the web UI, terminal app, or Agent',
+  daemon: 'System, in the web UI, terminal app, or Agent',
+  work: 'Work, in the web UI, terminal app, or Agent',
+  channels: 'Mail, calendar and channels, in the web UI, terminal app, or Agent',
 };
 
 /** The area of an owner-only method, for its sentence (by its id's first part). */
@@ -453,10 +453,6 @@ export function ownerOnlyCapabilityCall(id: string, values: Readonly<Record<stri
     if (id === 'mcp.remove' && (values['scope'] ?? 'project') !== 'project') return 'tools';
     return undefined;
   }
-  if (id === 'devices.take-project' || id === 'devices.take-shared') {
-    const who = (values['who'] ?? '').trim();
-    return who !== '' && who === facts.principalId ? undefined : 'devices';
-  }
   return undefined;
 }
 
@@ -470,9 +466,7 @@ export function ownerOnlyCapabilityCall(id: string, values: Readonly<Record<stri
  * accepting of a group's value are owner items, joining a group is a judgment).
  */
 export const MODEL_NEVER_CAPABILITY_IDS: ReadonlySet<string> = new Set([
-  'devices.migrate-shared', 'devices.give-project', 'devices.give-shared', 'devices.revoke-shared', 'devices.approve', 'devices.reject',
-  'provider.export', 'secrets.trust', 'permissions.place', 'permissions.revoke',
-  'security.enforce-policy', 'security.restore-policy', 'workspaces.register',
+  'devices.migrate-shared', 'devices.revoke-shared', 'devices.approve', 'devices.reject', 'provider.export',
 ]);
 
 /** The class of one call of a method: by its body where the table says the body decides, else the descriptor's. */

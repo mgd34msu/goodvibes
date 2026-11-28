@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "GoodVibes Operator API",
-    "version": "3.5.0",
+    "version": "3.6.0",
     "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 681 cataloged methods: 546 with dedicated REST bindings, 135 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
   },
   "servers": [
@@ -300,7 +300,7 @@
       "post": {
         "operationId": "approvals.approve",
         "summary": "Approve Approval",
-        "description": "Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval's own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command's terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response's recorded block reports what the broker actually recorded. Every action sends `expectedRevision`, the `revision` of the approval it showed or read; without it the call is 400 INVALID_ARGUMENT. The answer is 200 with `applied`, the record and its `reading` for the caller as they are now; when `applied` is false, `refusal.code` says why: APPROVAL_SETTLED (it already ended; the first decision stands), APPROVAL_CHANGED (it moved since that revision: show the returned reading again and act on its revision), APPROVAL_EXPIRED (its deadline passed first; it is now expired), OWNER_DECISION_REQUIRED (only the paired-owner decision on the device that raised it can approve it). Malformed `disposition`, `selectedHunks`, `rememberTier`, `reason` or `modifiedArgs`, a hunk index out of range and `remember` with an amendment are 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is the owner's act: the Agent's credential is refused 403 OWNER_ONLY, and so is a token minted for automation for a change put to the owner (metadata `ownerAct`).",
+        "description": "Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval's own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command's terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response's recorded block reports what the broker actually recorded. Every action sends `expectedRevision`, the `revision` of the approval it showed or read; without it the call is 400 INVALID_ARGUMENT. The answer is 200 with `applied`, the record and its `reading` for the caller as they are now; when `applied` is false, `refusal.code` says why: APPROVAL_SETTLED (it already ended; the first decision stands), APPROVAL_CHANGED (it moved since that revision: show the returned reading again and act on its revision), APPROVAL_EXPIRED (its deadline passed first; it is now expired), OWNER_DECISION_REQUIRED (only the paired-owner decision on the device that raised it can approve it). Malformed `disposition`, `selectedHunks`, `rememberTier`, `reason` or `modifiedArgs`, a hunk index out of range and `remember` with an amendment are 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is your own act, from any of your credentials: the Agent's credential is refused 403 OWNER_ONLY (a model is acting with it), and so is a device whose stored scope list does not hold the right to answer.",
         "tags": [
           "approvals"
         ],
@@ -1400,7 +1400,7 @@
           {
             "code": "OWNER_ONLY",
             "status": 403,
-            "meaning": "Only the owner answers this approval: the Agent's credential never does, and a token minted for automation does not answer a change put to the owner. Nothing was answered."
+            "meaning": "Only you answer this approval, from any of your credentials: the Agent's credential never does (a model is acting with it), and a device whose stored scope list does not hold the right to answer does not. Nothing was answered."
           }
         ],
         "parameters": [
@@ -3783,7 +3783,7 @@
       "post": {
         "operationId": "approvals.deny",
         "summary": "Deny Approval",
-        "description": "Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user's free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response's recorded block reports what the broker actually recorded. Every action sends `expectedRevision`, the `revision` of the approval it showed or read; without it the call is 400 INVALID_ARGUMENT. The answer is 200 with `applied`, the record and its `reading` for the caller as they are now; when `applied` is false, `refusal.code` says why: APPROVAL_SETTLED (it already ended; the first decision stands), APPROVAL_CHANGED (it moved since that revision: show the returned reading again and act on its revision), APPROVAL_EXPIRED (its deadline passed first; it is now expired), OWNER_DECISION_REQUIRED (only the paired-owner decision on the device that raised it can approve it). `disposition` is `denied` or `amended` (an amendment cannot be remembered). Malformed `disposition`, `rememberTier` or `reason` is 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is the owner's act: the Agent's credential is refused 403 OWNER_ONLY, and so is a token minted for automation for a change put to the owner (metadata `ownerAct`).",
+        "description": "Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user's free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response's recorded block reports what the broker actually recorded. Every action sends `expectedRevision`, the `revision` of the approval it showed or read; without it the call is 400 INVALID_ARGUMENT. The answer is 200 with `applied`, the record and its `reading` for the caller as they are now; when `applied` is false, `refusal.code` says why: APPROVAL_SETTLED (it already ended; the first decision stands), APPROVAL_CHANGED (it moved since that revision: show the returned reading again and act on its revision), APPROVAL_EXPIRED (its deadline passed first; it is now expired), OWNER_DECISION_REQUIRED (only the paired-owner decision on the device that raised it can approve it). `disposition` is `denied` or `amended` (an amendment cannot be remembered). Malformed `disposition`, `rememberTier` or `reason` is 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is your own act, from any of your credentials: the Agent's credential is refused 403 OWNER_ONLY (a model is acting with it), and so is a device whose stored scope list does not hold the right to answer.",
         "tags": [
           "approvals"
         ],
@@ -4883,7 +4883,7 @@
           {
             "code": "OWNER_ONLY",
             "status": 403,
-            "meaning": "Only the owner answers this approval: the Agent's credential never does, and a token minted for automation does not answer a change put to the owner. Nothing was answered."
+            "meaning": "Only you answer this approval, from any of your credentials: the Agent's credential never does (a model is acting with it), and a device whose stored scope list does not hold the right to answer does not. Nothing was answered."
           }
         ],
         "parameters": [
@@ -32551,7 +32551,7 @@
       "delete": {
         "operationId": "channels.profiles.delete",
         "summary": "Unbind Channel Profile",
-        "description": "Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal. Removing a binding whose permission mode is tighter than the one its channel's sessions would fall back to (the surface-wide binding's, else the host's) loosens it, which is the owner's own act: from a caller who is not the owner it answers 202 OWNER_APPROVAL_PENDING and is removed when the owner approves it; with no approval path it is 403 OWNER_ONLY.",
+        "description": "Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal. Removing a binding whose permission mode is tighter than the one its channel's sessions would fall back to (the surface-wide binding's, else the host's) loosens it, which every credential of the user does at once (a device holding a narrow scope list is refused by its scopes).",
         "tags": [
           "channels"
         ],
@@ -33060,7 +33060,7 @@
       "post": {
         "operationId": "channels.profiles.set",
         "summary": "Bind Channel Profile",
-        "description": "Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names. A set that loosens the permission mode the channel's sessions run under (against the mode they get now, the host's when no binding sets one; leaving permissionMode out of a set removes the key's own mode) is the owner's own act, as sessions.permissionMode.set is: from a caller who is not the owner it is put to the owner and answers 202 OWNER_APPROVAL_PENDING with approvalId, followable, the current binding, mode, requestedMode, state and next, and applies when the owner approves it; with no approval path it is 403 OWNER_ONLY and nothing is changed.",
+        "description": "Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names. A set that loosens the permission mode the channel's sessions run under (against the mode they get now, the host's when no binding sets one; leaving permissionMode out of a set removes the key's own mode) is made at once by every credential of the user, as sessions.permissionMode.set is (a device holding a narrow scope list is refused by its scopes).",
         "tags": [
           "channels"
         ],
@@ -35876,6 +35876,9 @@
                         "continuationId": {
                           "type": "string"
                         },
+                        "project": {
+                          "type": "string"
+                        },
                         "repo": {
                           "type": "string"
                         },
@@ -35999,6 +36002,9 @@
                   "prNumber": {
                     "type": "number"
                   },
+                  "workingDirectory": {
+                    "type": "string"
+                  },
                   "deliveryChannel": {
                     "type": "string"
                   },
@@ -36040,6 +36046,9 @@
                             "type": "string"
                           },
                           "continuationId": {
+                            "type": "string"
+                          },
+                          "project": {
                             "type": "string"
                           },
                           "repo": {
@@ -41338,7 +41347,7 @@
       "post": {
         "operationId": "config.set",
         "summary": "Set Config Value",
-        "description": "Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE): the daemon serves every project at once and no caller moves it, so a call names its project itself. The same route also serves the settings clients' lane, which answers with its own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
+        "description": "Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE): the daemon serves every project at once and no caller moves it, so a call names its project itself. The same route also serves the settings clients' lane, which answers with its own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer). A change that loosens a security, permission, judgment or payment setting is made at once by every credential of the user (a sign-in under any name, a device paired with full scopes, the operator token); the permission mode in force decides one sent without the person's claim, as for any call. A device holding a narrow scope list reaches only what its list names (this method needs write:config and an admin: it is refused 403).\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
         "tags": [
           "config"
         ],
@@ -41635,7 +41644,7 @@
       "post": {
         "operationId": "config.reset",
         "summary": "Reset Config Value",
-        "description": "Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (no caller moves the daemon). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
+        "description": "Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (no caller moves the daemon). A change that loosens a security, permission, judgment or payment setting is made at once by every credential of the user (a sign-in under any name, a device paired with full scopes, the operator token); the permission mode in force decides one sent without the person's claim, as for any call. A device holding a narrow scope list reaches only what its list names (this method needs write:config and an admin: it is refused 403).\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
         "tags": [
           "config"
         ],
@@ -41803,7 +41812,7 @@
       "post": {
         "operationId": "config.setMany",
         "summary": "Set Several Config Values",
-        "description": "Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE), as with config.set. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
+        "description": "Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE), as with config.set. A change that loosens a security, permission, judgment or payment setting is made at once by every credential of the user (a sign-in under any name, a device paired with full scopes, the operator token); the permission mode in force decides one sent without the person's claim, as for any call. A device holding a narrow scope list reaches only what its list names (this method needs write:config and an admin: it is refused 403).\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
         "tags": [
           "config"
         ],
@@ -50633,6 +50642,28 @@
                       ],
                       "additionalProperties": false
                     },
+                    "budgetSetByOwner": {
+                      "type": "boolean"
+                    },
+                    "heldChange": {
+                      "type": "object",
+                      "properties": {
+                        "at": {
+                          "type": "number"
+                        },
+                        "step": {
+                          "type": "string"
+                        },
+                        "said": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "at",
+                        "said"
+                      ],
+                      "additionalProperties": false
+                    },
                     "failureKind": {
                       "type": "string",
                       "enum": [
@@ -58962,6 +58993,28 @@
                             ],
                             "additionalProperties": false
                           },
+                          "budgetSetByOwner": {
+                            "type": "boolean"
+                          },
+                          "heldChange": {
+                            "type": "object",
+                            "properties": {
+                              "at": {
+                                "type": "number"
+                              },
+                              "step": {
+                                "type": "string"
+                              },
+                              "said": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "at",
+                              "said"
+                            ],
+                            "additionalProperties": false
+                          },
                           "failureKind": {
                             "type": "string",
                             "enum": [
@@ -67284,6 +67337,28 @@
                           "required": [
                             "status",
                             "note"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "budgetSetByOwner": {
+                          "type": "boolean"
+                        },
+                        "heldChange": {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": "number"
+                            },
+                            "step": {
+                              "type": "string"
+                            },
+                            "said": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "said"
                           ],
                           "additionalProperties": false
                         },
@@ -115154,7 +115229,7 @@
       "post": {
         "operationId": "memory.records.list",
         "summary": "List Memory Records",
-        "description": "Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project's records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (the owner in person only, their place's \"Every project\") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.",
+        "description": "Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project's records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (you, from any of your credentials: your place's \"Every project\") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.",
         "tags": [
           "memory"
         ],
@@ -141090,7 +141165,7 @@
       "post": {
         "operationId": "sessions.permissionMode.set",
         "summary": "Set Session Permission Mode",
-        "description": "Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session; a web chat (companion-chat) has no mode of its own, so setting it rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired in person sets it at once): it is put to the owner as an approval only the owner's own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when the owner approves it.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
+        "description": "Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session; a web chat (companion-chat) has no mode of its own, so setting it rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode is set at once by every credential of the user (a sign-in under any name, a device paired with full scopes, the operator token); a device holding a narrow scope list is refused by its scopes.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
         "tags": [
           "sessions"
         ],
@@ -152164,7 +152239,7 @@
       "post": {
         "operationId": "work.target",
         "summary": "Name A Piece Of Work For An Act",
-        "description": "Read what an act on one piece of work sends, from the work alone: `operation` \"execution\" answers the identity start, status, stop and resume take (its current attempt and revisions); \"contract\" answers the run that answering, running a step again and the spending limit act on; \"own\" answers only whether this caller may act on the work at all (a paired device, the outside agent or a member acts only on work it asked for itself: WORK_NOT_YOURS otherwise). Every other field is passed through. Answers { summary, input }; nothing is kept.",
+        "description": "Read what an act on one piece of work sends, from the work alone: `operation` \"execution\" answers the identity start, status, stop and resume take (its current attempt and revisions); \"contract\" answers the run that answering, running a step again and the spending limit act on; \"own\" answers only whether this caller may act on the work at all (you may from any of your credentials, a sign-in, a paired device or the machine's token; a caller that is not you acts only on work it asked for itself: WORK_NOT_YOURS otherwise). Every other field is passed through. Answers { summary, input }; nothing is kept.",
         "tags": [
           "work-ledger"
         ],
@@ -172618,6 +172693,9 @@
           },
           "password": {
             "type": "string"
+          },
+          "newPassword": {
+            "type": "string"
           }
         },
         "required": [
@@ -172704,6 +172782,23 @@
               }
             ]
           },
+          "credential": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "local",
+                  "shared-token",
+                  "device-token",
+                  "agent",
+                  "user-session"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "admin": {
             "type": "boolean"
           },
@@ -172718,6 +172813,19 @@
             "items": {
               "type": "string"
             }
+          },
+          "expiresAt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ownerHimself": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -172728,6 +172836,7 @@
           "sessionCookiePresent",
           "principalId",
           "principalKind",
+          "credential",
           "admin",
           "scopes",
           "roles"

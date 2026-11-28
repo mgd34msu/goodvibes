@@ -429,7 +429,7 @@ function registeredSessionOf(invocation: GatewayMethodInvocation, deps: Pick<Cap
   return (sessionId) => {
     const registrant = deps.sessionRegistrant?.(sessionId);
     return registrantMayName(registrant, { key, registration })
-      || (agentOfOwner && registration !== undefined && registrant === `${LOCAL_OWNER_PRINCIPAL}${REGISTRATION_MARK}${registration}`);
+      || (agentOfOwner && registrant !== undefined && (registrant === LOCAL_OWNER_PRINCIPAL || registrant.startsWith(`${LOCAL_OWNER_PRINCIPAL}${REGISTRATION_MARK}`)));
   };
 }
 
@@ -581,8 +581,7 @@ function createRunHandler(deps: CapabilityRouteDeps, methods: Pick<GatewayMethod
       : needs?.program !== undefined && !caller.program ? { field: 'program', said: needs.program } : undefined;
     if (lacking) {
       throw new GatewayVerbError(lacking.said, 'CAPABILITY_CALLER_CONTEXT_MISSING', 422, lacking.field, {
-        state: 'nothing ran', next: [`Send ${lacking.field} with the request${lacking.field === 'program' ? ' (tui or agent)' : ' (the project folder)'}.`,
-          ...(lacking.field === 'workingDirectory' ? ['A caller that is not the owner\'s own program works only in a project the owner gave it: the owner gives it one in Devices and network, on its row, and the outside agent (goodvibes-daemon mcp serve) that names one is asked about once.'] : [])],
+        state: 'nothing ran', next: [`Send ${lacking.field} with the request${lacking.field === 'program' ? ' (tui or agent)' : ' (the project folder)'}.`],
       });
     }
     // Its preview check (a file outside the project named by a caller who is not the person, a path named from another
@@ -709,7 +708,7 @@ function createRunHandler(deps: CapabilityRouteDeps, methods: Pick<GatewayMethod
       const hisOwnTurn = ownerDecided && invocation.context.call?.othersInput !== true;
       const othersOwnAct = othersOwnerEffects.length > 0
         || (definition.ownersAct === true && !ownerDecided && actor.agentFor === undefined && !isTheUser(actor) && actor.class !== 'system')
-        || (caller.ownerHimself !== true && !hisOwnTurn && actor.class !== 'owner' && actor.class !== 'system' && definition.ownersActWhen?.(values, deps.services) === true);
+        || (caller.ownerHimself !== true && !hisOwnTurn && !isTheUser(actor) && actor.class !== 'system' && definition.ownersActWhen?.(values, deps.services) === true);
       // An answer keeps its own rule and words (`ownerAnswers`, below).
       if (othersOwnAct && !answers) {
         throw new GatewayVerbError(ownerOnlyActWords(`${entry.label} (${entry.id})`, OWNER_ONLY_WHERE[othersOwnerEffects.length > 0 ? ownerOnlyEffectArea(othersOwnerEffects[0]!) : 'memory']),
@@ -845,8 +844,10 @@ function createRunHandler(deps: CapabilityRouteDeps, methods: Pick<GatewayMethod
         // own output as any command line prints what it made; method-owner-decision.ts `ownersCommandLine`). Any other
         // caller is told where the owner sees it, and never gets it.
         const reveal = definition.reveals && result.reveal ? { ...definition.reveals, ...result.reveal } : undefined;
-        const toPerson = reveal !== undefined && (personAsked(at) || ownersCommandLine(callerFactsOf(at)));
-        const withheld = reveal && !toPerson ? ` The ${definition.reveals!.label.toLowerCase()} is shown only to the owner, when they ask for it themselves.` : '';
+        const actorOfCall = at.context.actor ?? systemActor('in-process');
+        const aModel = decidedByProgramGate(at) || (at.context.clientKind === 'daemon-turn' && !at.context.authToken) || actorOfCall.agentFor !== undefined;
+        const toPerson = reveal !== undefined && !aModel && isTheUser(actorOfCall);
+        const withheld = reveal && !toPerson ? ` The ${definition.reveals!.label.toLowerCase()} is shown only to the user, in the place that holds it.` : '';
         return {
           // Its words judged on the values as the caller named them, as its risk is (never the scratch copy's path).
           id: entry.id, ok: true, text: `${capabilityOutcomeText(entry, judged, result)}${withheld}`, detail: `${result.text}${withheld}`, risk,

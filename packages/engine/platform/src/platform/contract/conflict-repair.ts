@@ -73,7 +73,7 @@ async function branchIsIn(cwd: string, branch: string): Promise<boolean> {
 /** The paths git still lists as unmerged, with the conflict's own files. */
 async function conflictedPaths(cwd: string, files: readonly string[]): Promise<string[]> {
   const git = await gitIn(cwd);
-  const unmerged = (await git.raw(['ls-files', '--unmerged'])).split('\n').map((line) => line.split('\t')[1]).filter((path): path is string => Boolean(path));
+  const unmerged = (await git.raw(['ls-files', '--unmerged'])).split('\n').map((line: string) => line.split('\t')[1]).filter((path: string | undefined): path is string => Boolean(path));
   return [...new Set([...files, ...unmerged])];
 }
 
@@ -150,7 +150,7 @@ export async function setRepairTreeAside(projectRoot: string, cwd: string, workB
     if ((await tree.raw(['status', '--porcelain', '--untracked-files=all'])).trim() !== '') return;
     // Its last commit is in the work's own branch: the tree holds nothing of its own.
     const head = (await tree.raw(['rev-parse', 'HEAD'])).trim();
-    if (!(await tree.raw(['branch', '--contains', head, '--format=%(refname:short)'])).split('\n').map((line) => line.trim()).includes(workBranch)) return;
+    if (!(await tree.raw(['branch', '--contains', head, '--format=%(refname:short)'])).split('\n').map((line: string) => line.trim()).includes(workBranch)) return;
     const project = await gitIn(projectRoot);
     await project.raw(['worktree', 'remove', '--force', cwd]);
     await project.raw(['branch', '-D', own]);

@@ -245,7 +245,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     workspaceTrustManager: services.workspaceTrustManager,
     workspaceRegistrationManager: new WorkspaceRegistrationManager({ shellPaths: services.shellPaths }),
     knowledgeService: services.knowledgeService,
-    contractRunner: services.contractRunner,
+    contractRunner: services.contractRunner ?? undefined,
     contractOperator: services.contractOperator,
     acpManager,
     codeIndexStore: services.codeIndexStore,

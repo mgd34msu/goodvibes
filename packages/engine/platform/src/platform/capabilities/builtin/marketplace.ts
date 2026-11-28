@@ -190,7 +190,7 @@ export const MARKETPLACE_HISTORY = read({
     const backups = listEcosystemInstallBackups(values.kind as EcosystemEntryKind, values.entry!, scoped(project(services, caller).catalog, values));
     return {
       text: backups.length > 0
-        ? [`The ${values.kind} ${values.entry} has ${backups.length} backup${backups.length === 1 ? '' : 's'} to roll back to, newest first:`, ...backups.map((backup) => `${new Date(backup.createdAt).toLocaleString()}: version ${backup.receipt.entry.version ?? 'not said'}, kept before ${backup.reason === 'update' ? 'an update' : backup.reason === 'rollback' ? 'a roll back' : backup.reason}`)].join('\n')
+        ? [`The ${values.kind} ${values.entry} has ${backups.length} backup${backups.length === 1 ? '' : 's'} to roll back to, newest first:`, ...backups.map((backup) => `${new Date(backup.createdAt).toLocaleString()}: version ${backup.receipt.entry.version ?? 'not said'}, kept before ${backup.reason === 'update' ? 'an update' : backup.reason}`)].join('\n')
         : `The ${values.kind} ${values.entry} has no backups to roll back to.`,
       data: { backups: backups.map((backup) => ({ id: backup.id, at: backup.createdAt, reason: backup.reason, version: backup.receipt.entry.version ?? null })) },
     };
@@ -337,7 +337,7 @@ export interface MarketplaceRecommendServices {
     recommend(): Promise<{
       readonly ranking: string;
       readonly startupIssues: readonly string[];
-      readonly recommendations: readonly { readonly kind: string; readonly entry: { readonly id: string }; readonly title: string; readonly reason: string }[];
+      readonly recommendations: readonly { readonly kind: string; readonly entry: { readonly id: string; readonly name?: string | undefined }; readonly title: string; readonly reason: string }[];
     }>;
   } | undefined;
 }

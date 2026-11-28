@@ -692,7 +692,8 @@ export class GatewayMethodCatalog {
     if (!entry) {
       throw new GatewayVerbError(`Unknown gateway method: ${id}`, EngineErrorCodes.METHOD_NOT_FOUND, 404);
     }
-    if (!entry.handler) {
+    const handler = entry.handler;
+    if (!handler) {
       // A method explicitly marked invokable:false with no registered handler is
       // honestly "not invokable anywhere" (see the field's doc comment), distinct
       // from a method that a caller expected to have a handler here but doesn't (a
@@ -722,7 +723,7 @@ export class GatewayMethodCatalog {
     if (confirmation !== undefined) requireConfirmation(confirmation, id, readInvocationParams(invocation), invocation.context);
     // A paged list the handler serves keeps only what the caller may reach before it cuts its page (daemon-api
     // `keepReachable`); the owner at large is served as before.
-    const answer = await withRecordReach(reachFilterOf(invocation.context, reach, invocation.body), () => entry.handler(invocation));
+    const answer = await withRecordReach(reachFilterOf(invocation.context, reach, invocation.body), () => handler(invocation));
     // A list or a search it declares is what the caller may reach of it, by the same rule.
     return !(answer instanceof Response) ? reachableAnswer(id, answer, invocation.context, reach, invocation.body) : answer;
   }

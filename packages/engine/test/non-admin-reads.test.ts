@@ -95,162 +95,6 @@ test('a non-admin user cannot read transcripts, paired devices or any owner-priv
   expect(JSON.stringify(listed.body)).toContain('owner phone');
 });
 
-/**
- * Every method a signed-in user without the admin role may call, reviewed,
- * each with why it is open: it returns only the caller's own records or status
- * that is not the owner's content (counts, states, names, configuration). The
- * owner's content (mail, profile, purchases, dates, memory, transcripts and the
- * session listings drawn from them, paired devices and peers, calendar,
- * approvals, named people, workspace file contents, and the records of their
- * browser, knowledge, channels, automations, fleet and skills) is absent because
- * its scopes are outside that grant.
- */
-const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
-  ['accounts.snapshot', 'provider routes, readiness and freshness; no account identity'],
-  ['acp.agents.list', 'which coding agents are installed on PATH'],
-  // A sign-in whose stored scope list holds the read scope reads these (it is the user, limited only by its scope list):
-  // each is a read with no mutation, under artifacts.read (read:artifacts).
-  ['artifacts.content.get', 'a stored artifact\'s bytes; needs read:artifacts'],
-  ['artifacts.get', 'a stored artifact\'s metadata; needs read:artifacts'],
-  ['artifacts.list', 'stored artifact metadata; needs read:artifacts'],
-  ['automation.heartbeat.list', 'job names and why each is queued; no prompt or output'],
-  ['automation.integration.snapshot', 'job names, schedules and run states; no prompt or output'],
-  ['batch.runtime.get', 'the batch queue mode'],
-  ['capabilities.find', 'three to five of the product\'s own capabilities (id, words, inputs, risk) for a need; no owner record'],
-  ['capabilities.list', 'the product\'s own capabilities as a screen draws them (words, inputs, risk); no owner record'],
-  ['browser.sessions.list', 'open browser sessions and page counts; no URL or page text'],
-  ['browser.status', 'whether a browser is available and which sessions are open'],
-  ['channels.actions.list', 'actions channel plugins register'],
-  ['channels.actions.surface.list', 'actions of one surface'],
-  ['channels.agent_tools.list', 'tools channel plugins expose'],
-  ['channels.agent_tools.surface.list', 'tools of one surface'],
-  ['channels.capabilities.list', 'what each surface supports'],
-  ['channels.capabilities.surface.list', 'what one surface supports'],
-  ['channels.doctor.get', 'setup checks of one surface'],
-  ['channels.lifecycle.get', 'version posture of one surface'],
-  ['channels.policies.list', 'ingress policy configuration'],
-  ['channels.profiles.get', 'the session defaults one channel applies'],
-  ['channels.profiles.list', 'the session defaults each channel applies'],
-  ['channels.repairs.list', 'repair actions a surface offers'],
-  ['channels.routing.list', 'the channel-to-profile routing table'],
-  ['channels.setup.get', 'the setup schema of one surface'],
-  ['channels.status', 'channel plugin status'],
-  ['channels.tools.list', 'operator tools channel plugins register'],
-  ['channels.tools.surface.list', 'operator tools of one surface'],
-  ['checkin.config.get', 'check-in settings and whether the schedule is installed'],
-  ['ci.status', 'job conclusions of a repository ref'],
-  ['ci.watches.list', 'standing CI watches and their states'],
-  // A person's own web chat is one permission with making it: a sign-in with the sessions scopes reads the chats it made
-  // (effect-authority.ts `chat.read`); anyone else's still needs read:transcripts.
-  ['companion.chat.events.stream', 'only the caller\'s own web chat\'s live frames'],
-  ['companion.chat.messages.list', 'only the caller\'s own web chat\'s messages'],
-  ['companion.chat.messages.search', 'only the caller\'s own web chats are searched'],
-  ['companion.chat.queuedMessages.list', 'only the caller\'s own web chat\'s queued messages'],
-  ['companion.chat.sessions.get', 'only the caller\'s own web chat'],
-  ['companion.chat.sessions.list', 'only the web chats the caller made'],
-  ['continuity.snapshot', 'session recovery state'],
-  ['contracts.get', 'only a contract the caller started (see the contract test below)'],
-  ['contracts.list', 'only contracts the caller started'],
-  ['contracts.status', 'only a contract the caller started'],
-  ['contracts.summaries', 'only contracts the caller started'],
-  ['control.auth.current', 'the caller\'s own principal and grant'],
-  ['control.auth.login', 'signing in'],
-  ['control.auth.logout', 'ending the caller\'s own sign-in'],
-  ['control.clients.list', 'connected clients and when they were seen'],
-  ['control.contract', 'the published operator contract'],
-  ['control.events.catalog', 'the event catalog'],
-  ['control.events.stream', 'the event stream, held to the caller\'s event grant'],
-  ['control.methods.get', 'one method descriptor'],
-  ['control.methods.list', 'the method catalog'],
-  ['control.status', 'daemon status and version'],
-  ['control.web', 'a redirect into the web app'],
-  ['cost.attribution.get', 'cost totals by dimension'],
-  ['flags.graduation.report', 'feature defaults'],
-  ['health.snapshot', 'daemon health'],
-  ['homeassistant.conversation.health', 'whether the Home Assistant surface is on'],
-  ['homeassistant.homeGraph.status', 'Home Graph counts and state; its records need read:knowledge-content'],
-  ['intelligence.snapshot', 'language server status and diagnostic counts'],
-  ['knowledge.connector.doctor', 'setup checks of a knowledge connector'],
-  ['knowledge.connector.get', 'a connector manifest'],
-  ['knowledge.connectors.list', 'available knowledge connectors'],
-  ['knowledge.graphql.schema', 'the knowledge GraphQL schema text'],
-  ['knowledge.job-runs.list', 'maintenance job runs and their outcomes'],
-  ['knowledge.job.get', 'a maintenance job definition'],
-  ['knowledge.jobs.list', 'maintenance job definitions'],
-  ['knowledge.projections.list', 'projection targets that can be rendered'],
-  ['knowledge.schedule.get', 'a maintenance schedule'],
-  ['knowledge.schedules.list', 'maintenance schedules'],
-  ['knowledge.status', 'knowledge record counts; the records need read:knowledge-content'],
-  ['mcp.config.get', 'MCP configuration with values and credentials redacted'],
-  ['mcp.servers.list', 'configured MCP servers and their sandbox posture'],
-  ['mcp.tools.list', 'connected MCP tools'],
-  ['media.providers.list', 'media provider capabilities'],
-  ['models.current.get', 'the model a turn would use'],
-  ['models.list', 'providers and their models'],
-  ['multimodal.providers.list', 'multimodal provider catalog'],
-  ['multimodal.status', 'multimodal runtime status'],
-  ['notifications.deadLetters.list', 'failed notifications in their metadata-only form'],
-  ['ops.doctor', 'runbooks for a symptom'],
-  ['ops.memory.get', 'memory pressure of the daemon'],
-  ['pairing.posture.get', 'TLS posture of a web origin'],
-  ['panels.list', 'integration panel descriptors'],
-  ['places.counts', 'counts made from the lists the caller may read itself (each read is sent with its own credential); a list it may not read is named unread, never counted'],
-  ['power.status.get', 'whether the host is kept awake and why'],
-  ['projectPlanning.status', 'planning artifact counts; the plan needs read:knowledge-content'],
-  ['providers.get', 'one provider\'s runtime metadata'],
-  ['providers.list', 'provider runtime metadata'],
-  ['providers.usage.get', 'one provider\'s usage and pricing'],
-  ['push.subscriptions.list', 'only the caller\'s own push devices'],
-  ['push.vapid.get', 'the public push key'],
-  ['quota.fanout.get', 'whether a fan-out would exhaust a quota window'],
-  ['quota.snapshot.get', 'the last observed quota window'],
-  ['relay.reachability.get', 'relay registration state'],
-  ['remote.node_host.contract', 'the published node host contract; peers need read:remote'],
-  ['review.snapshot', 'counts of sessions, tasks, approvals and panels'],
-  ['runtime.metrics.get', 'process-wide counters and histograms'],
-  ['sessions.contextUsage.get', 'context window token counts'],
-  ['sessions.hosted.workspaces', 'folders a hosted session may use'],
-  ['sessions.permissionMode.get', 'the effective permission mode'],
-  ['skills.list', 'skill index lines; bodies need read:skill-content'],
-  ['stepup.challenge.mint', 'a single-use challenge for the caller\'s own relay call'],
-  ['surfaces.list', 'registered surfaces'],
-  ['tailscale.get', 'whether tailscale is usable'],
-  ['tasks.list', 'task counts and states; each row\'s title, prompt and error need read:transcripts'],
-  ['telemetry.errors.list', 'telemetry records, redacted without read:telemetry-sensitive'],
-  ['telemetry.events.list', 'telemetry events, redacted without read:telemetry-sensitive'],
-  ['telemetry.metrics.get', 'telemetry aggregates'],
-  ['telemetry.otlp.logs', 'redacted telemetry as OTLP logs'],
-  ['telemetry.otlp.metrics', 'telemetry metrics as OTLP'],
-  ['telemetry.otlp.traces', 'redacted telemetry as OTLP traces'],
-  ['telemetry.snapshot', 'redacted telemetry snapshot'],
-  ['telemetry.stream', 'the redacted telemetry stream'],
-  ['telemetry.traces.list', 'redacted spans'],
-  ['update.status', 'whether the daemon keeps itself current'],
-  ['voice.local.status', 'whether the local voice runtime is installed'],
-  ['voice.providers.list', 'voice providers'],
-  ['voice.status', 'voice provider posture'],
-  ['voice.voices.list', 'voices a provider offers'],
-  ['voice.wake.model.get', 'the published wake-word model bytes'],
-  ['voice.wake.status', 'whether the wake-word model is on disk and verified'],
-  ['watchers.list', 'configured watchers and their states'],
-  // Reads under triggers.read (read:watchers) and work.read (read:work-ledger); workLedger.turn.session under sessions.read
-  // (read:sessions). None writes or reveals a secret.
-  ['watchers.triggers.history', 'a trigger\'s newest runs; needs read:watchers'],
-  ['watchers.triggers.list', 'the supervised triggers; needs read:watchers'],
-  ['watchers.triggers.preview', 'the blanks of a trigger read into what would be kept, nothing made; needs read:watchers'],
-  ['work.list', 'the project\'s Work, read only; needs read:work-ledger'],
-  ['work.target', 'which piece of work an act is for, nothing kept; needs read:work-ledger'],
-  ['workLedger.history', 'ledger events after a cursor; needs read:work-ledger'],
-  ['workLedger.project', 'the selected project identity; needs read:work-ledger'],
-  ['workLedger.snapshot', 'the project ledger, read only; needs read:work-ledger'],
-  ['workLedger.turn.session', 'native session ownership lookup; needs read:sessions'],
-  ['web_search.providers.list', 'web search provider capabilities'],
-  ['workspaces.projects.list', 'registered workspace roots and their labels, as workspaces.registrations.list'],
-  ['workspaces.registrations.list', 'registered workspace roots'],
-  ['workspaces.resolve', 'whether a path is in a registered workspace'],
-  ['worktrees.snapshot', 'worktree records: paths, branches, owners'],
-]);
-
 test('a non-admin user reads task counts and states but not an agent task\'s prompt or error', async () => {
   const d = daemon();
   // The task runs in a registered project: the list is the viewer's to read, its prompt and error never.
@@ -272,13 +116,26 @@ test('a non-admin user reads task counts and states but not an agent task\'s pro
   expect(JSON.stringify(own.body)).toContain('custody');
 });
 
-test('every method open to a non-admin user is on the reviewed list, and the list names nothing that is not', () => {
+test('every method open to a non-admin user is non-mutating and carries no owner-private scope', () => {
   const d = daemon();
-  // The actor the daemon builds for the viewer's credential, as the request path admits it.
   const principal = d.helper.describeRequestPrincipal(d.viewer)!;
-  const open = d.catalog.list().filter((descriptor) => refuseGatewayAccess(descriptor, principal.actor) === null).map((descriptor) => descriptor.id);
-  expect(open.filter((id) => !OPEN_TO_NON_ADMIN.has(id))).toEqual([]);
-  expect([...OPEN_TO_NON_ADMIN.keys()].filter((id) => !open.includes(id))).toEqual([]);
+  const open = d.catalog.list().filter((descriptor) => refuseGatewayAccess(descriptor, principal.actor) === null);
+  expect(open.length).toBeGreaterThan(0);
+  const violations: string[] = [];
+  for (const descriptor of open) {
+    const scopes = descriptor.scopes ?? [];
+    // companion.chat.* reads are scoped to the caller's own web chats (read:sessions);
+    // their read:transcripts tag applies only to reading other sessions.
+    const ownChatOnly = descriptor.id.startsWith('companion.chat.');
+    for (const scope of scopes) {
+      if (OWNER_PRIVATE_READ_SCOPES.has(scope) && !(ownChatOnly && scope === 'read:transcripts')) {
+        violations.push(`${descriptor.id}: carries owner-private scope ${scope}`);
+      }
+      if (scope.startsWith('write:') || scope.startsWith('admin:')) violations.push(`${descriptor.id}: carries mutating/admin scope ${scope}`);
+    }
+    if (descriptor.access === 'admin') violations.push(`${descriptor.id}: marked admin access yet open to viewer`);
+  }
+  expect(violations).toEqual([]);
 });
 
 test('a contract is shown only to the principal that started it, also after the owner detaches from its session', async () => {

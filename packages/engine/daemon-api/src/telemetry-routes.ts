@@ -324,7 +324,7 @@ function authenticateTelemetryRequest(
     }, { status: 401 });
   }
 
-  const missingRead = missingScopeRefusal('telemetry access', ['read:telemetry'], principal.scopes, {
+  const missingRead = principal.admin ? null : missingScopeRefusal('telemetry access', ['read:telemetry'], principal.scopes, {
     hint: 'Use a token or session with the read:telemetry scope, or elevate to an admin/shared-token session.',
   });
   if (missingRead) return jsonErrorResponse(missingRead, { status: 403 });

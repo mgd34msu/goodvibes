@@ -503,7 +503,7 @@ export const WORK_PROPOSE: CapabilityDefinition<WorkProposalCapabilityServices> 
     { id: 'criteria', label: 'Done when', help: 'The results that mean it is done, one per line (1 to 100)', kind: 'long-text', freeTextReason: 'what done means', required: true, typed: { flag: '--done-when' } },
     { id: 'steps', label: 'Plan', help: 'Its steps, one per line, in order: "Title: what it does", ending "(after 1, 2)" for the steps it waits on', kind: 'long-text', freeTextReason: 'the steps of the plan', required: true, typed: { flag: '--steps' } },
   ],
-  sentence: 'Proposes the work "{goal}" with its plan of steps for you to approve: it waits in Work, where you can change, move, take out or rewrite a step, approve it (that starts the work) or throw it away. Nothing runs until you approve.',
+  sentence: 'Proposes the work "{goal}" (done when: {criteria}; plan: {steps}) for you to approve: it waits in Work, where you can change, move, take out or rewrite a step, approve it (that starts the work) or throw it away. Nothing runs until you approve.',
   example: { goal: 'Add retries to the uploader', criteria: 'an upload that fails twice still finishes', steps: '1. Find the uploader: read where uploads are sent\n2. Add retries: retry a failed upload twice with a pause (after 1)\n3. Test it: a test where the first two uploads fail (after 2)' },
   noControl: 'It is what a model in plan mode offers in place of acting; a person asks for work with New work in the Work place, and approves, changes or throws away a proposal there.',
   async run(values, services, caller) {

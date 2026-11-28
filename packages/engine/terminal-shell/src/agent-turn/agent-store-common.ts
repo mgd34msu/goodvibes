@@ -80,8 +80,8 @@ export function writtenBy(context: Pick<StoreActContext, 'author'>): RecordAutho
  */
 export function ownersOwnReview(context: Pick<StoreActContext, 'author'>, what: string): void {
   if (context.author?.kind === 'owner') return;
-  throw new CapabilityRefusal(`${what} is the owner's decision that its text may reach the prompt, so it counts only when the owner does it in person; nothing was changed.`,
-    'Ask the owner to review it in Memory and knowledge.', 'OWNER_REVIEW_REQUIRED');
+  throw new CapabilityRefusal(`${what} lets its text reach the prompt, so it must be reviewed directly by you; nothing was changed.`,
+    'Review it in Memory and knowledge.', 'OWNER_REVIEW_REQUIRED');
 }
 
 export function splitWords(value: string | undefined): readonly string[] {

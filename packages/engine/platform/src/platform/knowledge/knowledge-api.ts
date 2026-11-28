@@ -131,7 +131,6 @@ export interface MemoryApi {
 
 export type MemoryApiRegistry = Pick<
   MemoryRegistry,
-  | 'accept'
   | 'add'
   | 'doctor'
   | 'delete'

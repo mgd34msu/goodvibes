@@ -55,6 +55,7 @@ type FreeFields<E> = {
 
 /** The class of an event field, by its name: the meaning a name has across the vocabulary. */
 const EVENT_FIELD_CLASS = {
+  about: 'shown',
   accountId: 'shown',
   accumulated: 'content',
   action: 'shown',
@@ -183,12 +184,14 @@ const EVENT_FIELD_CLASS = {
   problems: { withhold: ['message'] },
   profileId: 'shown',
   progress: 'content',
+  project: 'shown',
   projectId: 'shown',
   prompt: 'content',
   promptSummary: 'content',
   protocol: 'shown',
   provider: 'shown',
   providerBatchId: 'shown',
+  providerCode: 'shown',
   providerName: 'shown',
   providerRequestId: 'shown',
   quality: 'shown',

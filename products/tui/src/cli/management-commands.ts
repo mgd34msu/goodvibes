@@ -84,7 +84,6 @@ export async function buildControlPlaneStatusResult(runtime: CliCommandRuntime):
     );
   if (daemonEnabled && binding.recognized && !reachable)
     issues.push(`The daemon is on but its control plane is not reachable on ${binding.host}:${binding.port}.`);
-  if (enabled === true && !daemonEnabled) issues.push('controlPlane.enabled serves other machines, but daemon.enabled is off, so nothing is served.');
   if (enabled === true && service.enabled !== true) issues.push('Other machines are served (controlPlane.enabled) but service mode is off.');
   if (enabled === true && service.autostart !== true) issues.push('Other machines are served (controlPlane.enabled) but service autostart is off.');
   if (enabled === true && service.restartOnFailure !== true) issues.push('Other machines are served (controlPlane.enabled) but service restart-on-failure is off.');
@@ -109,7 +108,7 @@ export function formatControlPlaneStatus(runtime: CliCommandRuntime, value: Cont
     value,
     [
       'GoodVibes control-plane status',
-      `  serves this machine: ${yesNo(value.daemonEnabled)} (daemon.enabled)`,
+      `  serves this machine: ${yesNo(value.daemonEnabled)}`,
       `  serves other machines: ${yesNo(value.enabled)} (controlPlane.enabled)`,
       `  bind: ${formatRuntimeEndpointBinding(value)}`,
       `  bind posture: ${value.recognized ? value.posture.label : 'unknown (unrecognized host mode)'}`,

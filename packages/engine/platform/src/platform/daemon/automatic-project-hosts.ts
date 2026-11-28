@@ -84,8 +84,6 @@ export function attachChat(projects: AutomaticProjects, id: string, folder: stri
 export function daemonAutomaticProjects(services: { readonly shellPaths: ShellPathService; readonly configManager: Pick<ConfigManager, 'get'> }): AutomaticProjects {
   const homeDirectory = services.shellPaths.homeDirectory;
   const daemonHome = resolveGoodVibesDaemonHome(homeDirectory);
-  const known = byHome.get(daemonHome);
-  if (known) return known;
   const daemonStateDir = services.shellPaths.resolveUserPath();
   const register = openWorkspaceRegistrationStore({ path: sharedWorkspaceRegisterPath(services.shellPaths), homeDir: homeDirectory, daemonStateDir });
   const made = new AutomaticProjects({
@@ -111,7 +109,7 @@ export function daemonAutomaticProjects(services: { readonly shellPaths: ShellPa
       const saved = await trust.setLevel('trusted', NOTHING_OF_ITS_OWN_TO_RUN);
       if (!saved.saved) throw new Error(`the trust of ${folder} could not be kept${saved.fault ? `: ${saved.fault}` : ''}`);
     },
-    recordFile: services.shellPaths.resolveProjectPath('automatic-projects.json'),
+    recordFile: join(daemonHome, 'automatic-projects.json'),
   });
   byHome.set(daemonHome, made);
   current = made;

@@ -3304,19 +3304,26 @@ export class ConfigManager {
       staged.mark(key);
     }
     const effective = staged.compose();
-    if (key === undefined) this.#replaceSettingsFile(this.configPath, () => ({}));
-    else {
-      this.#updateSettingsFile(this.configPath, raw => { deleteRawDotPath(raw, key); });
-      // A project value would put the key straight back at the next load.
-      if (this.projectOverridesKey(key, true)) this.#updateSettingsFile(this.projectConfigPath!, raw => deleteRawDotPath(raw, key));
-    }
-    const daemonKeys: readonly string[] = key === undefined ? listDaemonOwnedConfigPaths() : isDaemonOwnedConfigKey(key) ? [key] : [];
-    if (this.daemonTierPath && clearsDaemonTier && daemonKeys.length > 0) {
-      this.#updateSettingsFile(this.daemonTierPath, raw => daemonKeys.map(entry => deleteRawDotPath(raw, entry)).some(Boolean));
-    }
-    if (this.sharedTierPath) {
-      const resetKeys: readonly string[] = key === undefined ? SHARED_CONFIG_KEYS : (isSharedConfigKey(key) ? [key] : []);
-      if (resetKeys.length > 0) this.#updateSettingsFile(this.sharedTierPath, raw => resetKeys.map(entry => deleteRawDotPath(raw, entry)).some(Boolean));
+    try {
+      if (key === undefined) this.#replaceSettingsFile(this.configPath, () => ({}));
+      else {
+        this.#updateSettingsFile(this.configPath, raw => { deleteRawDotPath(raw, key); });
+        // A project value would put the key straight back at the next load.
+        if (this.projectOverridesKey(key, true)) this.#updateSettingsFile(this.projectConfigPath!, raw => deleteRawDotPath(raw, key));
+      }
+      const daemonKeys: readonly string[] = key === undefined ? listDaemonOwnedConfigPaths() : isDaemonOwnedConfigKey(key) ? [key] : [];
+      if (this.daemonTierPath && clearsDaemonTier && daemonKeys.length > 0) {
+        this.#updateSettingsFile(this.daemonTierPath, raw => daemonKeys.map(entry => deleteRawDotPath(raw, entry)).some(Boolean));
+      }
+      if (this.sharedTierPath) {
+        const resetKeys: readonly string[] = key === undefined ? SHARED_CONFIG_KEYS : (isSharedConfigKey(key) ? [key] : []);
+        if (resetKeys.length > 0) this.#updateSettingsFile(this.sharedTierPath, raw => resetKeys.map(entry => deleteRawDotPath(raw, entry)).some(Boolean));
+      }
+    } catch (error) {
+      // Earlier tier files may already have been updated before a later write failed:
+      // reload from disk so in-memory state matches what actually persisted.
+      try { this.load(); } catch { /* preserve error from the failing write */ }
+      throw error;
     }
     // Earlier files can have been replaced if a later write throws. Preserve
     // the complete live state; the next accepted load reconciles those bytes.

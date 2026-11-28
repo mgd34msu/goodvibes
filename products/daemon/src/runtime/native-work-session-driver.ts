@@ -247,11 +247,12 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
     // Construction can invoke supplied readers. Honor a reentrant stop before
     // reserving or deferring any foreground execution.
     if (closed || stopped.has(contract.id)) return;
+    const activeContract = contract;
     const { turn } = session;
     session.selectionChanged = false;
-    const source = contract.nativeSource!;
+    const source = activeContract.nativeSource!;
     const backoff = new AbortController();
-    const halted = () => closed || stopped.has(contract.id) || isTerminalContractStatus(options.runner.get(contract.id)?.status ?? 'cancelled');
+    const halted = () => closed || stopped.has(activeContract.id) || isTerminalContractStatus(options.runner.get(activeContract.id)?.status ?? 'cancelled');
     const textFor = () => !session.opened
       ? [...(session.failed ? [RETRY_TEXT] : []), source.goal, 'Original acceptance criteria:', ...source.criteria.map((criterion, index) => `${index + 1}. ${criterion}`), 'Current unit:', unit.brief].join('\n\n')
       : session.nudgeNext ? NUDGE_TEXT : session.failed ? `${RETRY_TEXT}\n\n${CONTINUE_TEXT}` : CONTINUE_TEXT;
@@ -261,7 +262,7 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
       let reported: { readonly error: unknown; readonly provider: boolean } | undefined;
       session.turnId = undefined;
       const off = options.runtimeBus.on('TURN_ERROR', envelope => {
-        if (envelope.sessionId !== contract.sessionId || envelope.payload.type !== 'TURN_ERROR') return;
+        if (envelope.sessionId !== activeContract.sessionId || envelope.payload.type !== 'TURN_ERROR') return;
         // Only this attempt's own turn: another turn of the shared session failing is not this attempt failing.
         if (session.turnId === undefined || envelope.payload.turnId !== session.turnId) return;
         const { stopReason, error } = envelope.payload;
@@ -273,7 +274,7 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
       // work the owner in person asked for or approved is their turn, changing files and running commands under their
       // mode as their conversation in the project would; anyone else's runs reads only and no command outside a real
       // sandbox, whatever the mode, until the owner approves it. Every decision on its calls is made for its project.
-      const party = options.workCauseOf(contract.sessionId);
+      const party = options.workCauseOf(activeContract.sessionId);
       const origin = party.party === 'owner'
         ? { source: 'native-work', surface: 'service', ownerDirect: true }
         : { source: 'native-work', surface: 'service' };

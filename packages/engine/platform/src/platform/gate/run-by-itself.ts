@@ -11,42 +11,29 @@
  * A path is read with either separator; a relative path counts by its own folders and name.
  */
 
-/** File names that run by themselves wherever they are. */
+/** File names that run automatically on shell/OS startup or load agent hooks/MCP configs. */
 const NAMES: ReadonlySet<string> = new Set([
   // Shell start-up files and a folder's environment (direnv).
   '.envrc', '.direnvrc', '.bashrc', '.bash_profile', '.bash_login', '.bash_logout', '.bash_aliases', '.profile', '.zshrc', '.zprofile',
   '.zshenv', '.zlogin', '.zlogout', '.kshrc', '.mkshrc', '.cshrc', '.tcshrc', '.login', '.logout', 'config.fish', '.inputrc',
-  '.xprofile', '.xinitrc', '.xsession', '.xsessionrc', '.pam_environment', '.vimrc', '.exrc', '.gvimrc', '.nanorc', '.wgetrc', '.curlrc',
-  // A repository's configuration that runs commands (hooks path, aliases, filters, fsmonitor, ssh command).
-  '.gitattributes', '.gitmodules', '.gitconfig', '.lefthook.yml', 'lefthook.yml', '.pre-commit-config.yaml', '.pre-commit-hooks.yaml',
-  // Package managers and project runners.
-  'package.json', '.npmrc', '.yarnrc', '.yarnrc.yml', '.pnpmfile.cjs', 'bunfig.toml', 'Makefile', 'makefile', 'GNUmakefile', 'justfile',
-  'Justfile', '.justfile', 'Taskfile.yml', 'Taskfile.yaml', 'Rakefile', 'Gemfile', 'pyproject.toml', 'setup.py', 'setup.cfg', 'tox.ini',
-  'noxfile.py', 'conftest.py', 'pytest.ini', 'sitecustomize.py', 'usercustomize.py', 'Cargo.toml', 'build.rs', 'build.gradle',
-  'build.gradle.kts', 'settings.gradle', 'pom.xml', 'CMakeLists.txt', 'meson.build', 'docker-compose.yml', 'docker-compose.yaml',
-  'compose.yml', 'compose.yaml', 'devcontainer.json', '.devcontainer.json',
-  // Lockfiles and requirement lists: a new worktree's setup installs from them by itself (runtime/worktree/setup.ts,
-  // `auto`), and an install runs the packages' own scripts.
-  'bun.lock', 'bun.lockb', 'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'uv.lock', 'requirements.txt',
-  // Tool servers and hooks any agent program loads.
+  '.xprofile', '.xinitrc', '.xsession', '.xsessionrc', '.pam_environment',
+  // Agent hook / MCP configs loaded automatically.
   'hooks.json', 'mcp.json', '.mcp.json', 'claude_desktop_config.json',
-  // Timers.
+  // System timers.
   'crontab', 'anacrontab',
 ]);
 
-/** Name endings that run by themselves (make files under any name, a python path hook). */
-const ENDINGS: readonly string[] = ['.mk', '.make', '.pth'];
+/** Name endings that run automatically as Python site hooks. */
+const ENDINGS: readonly string[] = ['.pth'];
 
-/** Folders (as path segments) whose files run by themselves later. */
+/** Folders (as path segments) whose files run automatically on OS/git/GoodVibes startup. */
 const FOLDERS: readonly (readonly string[])[] = [
-  ['.git', 'hooks'], ['.git', 'config'], ['.git', 'info', 'attributes'], ['.husky'], ['.githooks'],
-  ['.vscode', 'settings.json'], ['.vscode', 'tasks.json'], ['.vscode', 'launch.json'], ['.idea'], ['.devcontainer'],
-  ['.cargo', 'config.toml'], ['.cargo', 'config'],
-  ['.ssh'], ['.config', 'git'], ['.config', 'direnv'], ['.config', 'fish'], ['.config', 'autostart'], ['.config', 'systemd'],
+  ['.git', 'hooks'], ['.husky'], ['.githooks'],
+  ['.ssh'], ['.config', 'direnv'], ['.config', 'fish'], ['.config', 'autostart'], ['.config', 'systemd'],
   ['.config', 'environment.d'], ['.config', 'plasma-workspace', 'env'], ['.local', 'share', 'systemd'], ['Library', 'LaunchAgents'],
   ['etc', 'cron.d'], ['etc', 'cron.hourly'], ['etc', 'cron.daily'], ['etc', 'cron.weekly'], ['etc', 'cron.monthly'],
   ['var', 'spool', 'cron'], ['etc', 'profile.d'], ['etc', 'systemd'],
-  // GoodVibes' own: hooks, settings (the worktree setup in a project's settings), tool servers, plugins and skills.
+  // GoodVibes' own: hooks, settings, tool servers, plugins and skills.
   ['.goodvibes'],
 ];
 

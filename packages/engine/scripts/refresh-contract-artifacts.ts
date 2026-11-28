@@ -99,22 +99,26 @@ function writeIfChanged(path: string, content: string): boolean {
 }
 
 function renderOperatorContractTs(contract: unknown): string {
-  const json = safeStringify(contract);
+  // Compact JSON string parsed once at module load: avoids a 200K-line `as const`
+  // object literal that forced TypeScript to allocate >12 GB of heap during tsc.
+  const compact = JSON.stringify(JSON.parse(safeStringify(contract)));
   return [
     `import type { OperatorContractManifest } from '../types.js';`,
     `import { freezeGeneratedOperatorContract } from '../freeze-contract.js';`,
     ``,
-    `export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperatorContract(${json} as const);`,
+    `export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperatorContract(`,
+    `  JSON.parse(${JSON.stringify(compact)}) as OperatorContractManifest,`,
+    `);`,
     ``,
   ].join('\n');
 }
 
 function renderPeerContractTs(contract: unknown): string {
-  const json = safeStringify(contract);
+  const compact = JSON.stringify(JSON.parse(safeStringify(contract)));
   return [
     `import type { PeerContractManifest } from '../types.js';`,
     ``,
-    `export const PEER_CONTRACT: PeerContractManifest = ${json} as const;`,
+    `export const PEER_CONTRACT: PeerContractManifest = JSON.parse(${JSON.stringify(compact)}) as PeerContractManifest;`,
     ``,
   ].join('\n');
 }

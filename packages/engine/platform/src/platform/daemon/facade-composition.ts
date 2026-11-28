@@ -737,7 +737,7 @@ export function createDaemonFacadeCollaborators(
     // The style the spawn decided (conversation or report) shapes the reply; a contract is only the fallback.
     replyStyleOf: (agentId) => runtime.agentManager.getStatus(agentId)?.replyStyle,
     // A workstream is named from its own record, so one started before a restart still reads as its request.
-    contractAsk: (contractId) => runtime.runtimeServices.contractRunner.get(contractId)?.ask,
+    contractAsk: (contractId) => runtime.runtimeServices.contractRunner?.get(contractId)?.ask,
     // Save, then send: a conversation's answer is recorded owed before its send and sent once it went out,
     // so a daemon that dies mid-send sends it again after its restart (resendOwedChannelReplies).
     recordFinalOwed: ({ sessionId, agentId }) => runtime.sessionBroker.markChannelReplyOwed(sessionId, agentId),

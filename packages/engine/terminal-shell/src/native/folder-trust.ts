@@ -132,8 +132,6 @@ export async function settleFolderTrustOnOpen(
   if (!manager || !requestTrustDecision) return;
   try {
     await manager.load();
-    // As released: the trust card is shown in every mode, on opening and when the folder gains files of its own.
-    void say;
     manager.askWhenRepositoryFilesAppear(requestTrustDecision);
     const facts = folder();
     if (await trustFolderWithNothingOfItsOwn(manager, () => facts)) return;
@@ -141,7 +139,9 @@ export async function settleFolderTrustOnOpen(
       await manager.trustQuestion(requestTrustDecision).answer;
     }
   } catch (error) {
-    logger.info('The workspace trust question asked on opening was not answered', { error: summarizeError(error) });
+    const detail = summarizeError(error);
+    logger.warn('The workspace trust question asked on opening could not be settled', { error: detail });
+    say?.(`Folder trust could not be settled on opening (${detail}); this folder stays restricted until you decide.`);
   }
 }
 

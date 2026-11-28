@@ -292,7 +292,7 @@ export function buildScreenGroups(input: ScreenRowsInput): Map<string, ScreenEnt
   // The notification privacy control after the notification toggles.
   const behavior = groups.get('behavior');
   if (behavior) {
-    const privacy = behavior.findIndex((entry) => entry.setting.key === NOTIFICATIONS_METADATA_ONLY_KEY);
+    const privacy = behavior.findIndex((entry) => (entry.setting.key as string) === NOTIFICATIONS_METADATA_ONLY_KEY);
     if (privacy >= 0) behavior.push(...behavior.splice(privacy, 1));
   }
   // Cards are not settings: one row goes to where they are added and removed.

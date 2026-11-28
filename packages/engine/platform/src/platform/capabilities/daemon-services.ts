@@ -41,9 +41,6 @@ import { requireCallerProject } from './caller-project.js';
 import { projectIdentityOf } from '../workspace/project-identity.js';
 import { projectSettingsInForce } from '../config/project-view.js';
 import { noProjectFacts, noProjectRefusal } from '../workspace/caller-project.js';
-import { checkCallerProject, realPathOf, type CallerProjectVerdict } from '../workspace/caller-project.js';
-import { CallerProjectsStore } from '../workspace/caller-projects-store.js';
-import { CallerSharedStore } from '../control-plane/shared-kinds.js';
 import { createPluginCapabilityServices, type PluginServiceSources } from './plugins-services.js';
 import { controlPlaneStorePath } from '../control-plane/control-plane-store-paths.js';
 import { DAEMON_STATE_SURFACE_ROOT } from '../daemon/lifecycle-marker.js';
@@ -143,7 +140,7 @@ export interface DaemonCapabilityServiceSources {
   /** The daemon's one owner inbox (builtin/waiting.ts); absent where this service set was built without it. */
   readonly ownerInbox?: Pick<import('../control-plane/owner-inbox.js').OwnerInbox, 'list' | 'find'> | undefined;
   /** Permissions and safety (builtin/permissions.ts, security.ts): the one permission rule store, the token audit, the daemon's own folder's trust. */
-  readonly userPermissionRuleStore?: Pick<import('../permissions/user-rule-store.js').UserPermissionRuleStore, 'add'> | undefined;
+  readonly userPermissionRuleStore?: Pick<import('../permissions/user-rule-store.js').UserPermissionRuleStore, 'add' | 'list'> | undefined;
   readonly tokenAuditor?: Pick<import('../security/token-audit.js').ApiTokenAuditor, 'auditAll'> | undefined;
   readonly workspaceTrustManager?: import('../runtime/workspace-trust.js').WorkspaceTrustManager | undefined;
   /** Permissions and safety (builtin/security-review.ts): the daemon's policy state, which writes the one activation record. */
@@ -221,7 +218,7 @@ function folderTrustServices(sources: DaemonCapabilityServiceSources): (director
     if (own && resolve(own.workspaceRoot) === root) return own;
     let trust = folders.get(root);
     if (!trust) {
-      const homeDirectory = sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? dirname(resolveGoodVibesHome());
+      const homeDirectory = sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome();
       // The surface root names only where an earlier build's in-folder trust.json sat (never honored); the daemon's is `tui`.
       trust = new WorkspaceTrustManager({ shellPaths: createShellPathService({ workingDirectory: root, homeDirectory }), surfaceRoot: 'tui' });
       // A few folders at most are decided from one daemon; the oldest is let go past that.
@@ -239,7 +236,7 @@ function safetyChanged(change: 'created' | 'changed' | 'deleted' = 'changed', id
 
 /** The daemon's network scan: the decision and the servers kept under the daemon's folder, its providers told what it finds. */
 function networkScanServices(sources: DaemonCapabilityServiceSources): NetworkScanCapabilityServices['networkScan'] {
-  const homeDirectory = sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? dirname(resolveGoodVibesHome());
+  const homeDirectory = sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome();
   const roots = { homeDirectory, surfaceRoot: NETWORK_SCAN_SURFACE_ROOT };
   return {
     host: () => ({
@@ -374,6 +371,7 @@ function programFilesServices(sources: DaemonCapabilityServiceSources): Pick<Dae
         for (const [key, value] of TERMINAL_PROGRAM_DEFAULTS) manager.setRuntimeDefault(key as ConfigKey, value as never);
         return manager;
       },
+      daemonConfig: config,
       presets: (caller) => new ProfileManager(join(goodvibesRoot(), programOf(caller), 'profiles')),
       resolvePath,
     },
@@ -393,7 +391,7 @@ const DETACHED_DISPATCHER = {
  * announced as the `google` list changing; a consent link nobody is sitting at goes to the owner inbox.
  */
 function googleServices(sources: DaemonCapabilityServiceSources): GoogleCapabilityServices['google'] {
-  const homeDirectory = sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? dirname(resolveGoodVibesHome());
+  const homeDirectory = sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome();
   // The daemon hands its whole owner inbox; this source names only its reads, so its posting is looked for.
   const inbox = sources.ownerInbox as unknown as Partial<Pick<import('../control-plane/owner-inbox.js').OwnerInbox, 'postNow' | 'withdraw'>> | undefined;
   return daemonGoogleWork({
@@ -478,39 +476,6 @@ function notifyServices(sources: DaemonCapabilityServiceSources): NotifyCapabili
     get notifier() { return notifier(); },
     // The same reading the daemon's notifier makes at each delivery (runtime-graph.ts).
     metadataOnly: () => readNotificationsMetadataOnly(() => sources.configManager.get(NOTIFICATIONS_METADATA_ONLY_KEY as ConfigKey)),
-  };
-}
-
-/**
- * builtin/devices-projects.ts: the projects the owner gave each device or member (workspace/caller-projects-store.ts), in
- * this home's daemon home. A project given passes the one check of a caller's project (workspace/caller-project.ts) as
- * a device naming it would once given: a registered workspace or inside one, never the root, the home folder, or the
- * GoodVibes or daemon home.
- */
-function callerProjectsServices(homeDirectory: string): NonNullable<DaemonCapabilityServices['callerProjects']> {
-  const daemonHome = resolveGoodVibesDaemonHome(homeDirectory);
-  const store = new CallerProjectsStore(daemonHome);
-  const facts = { homeDirectory, goodVibesHome: join(homeDirectory, '.goodvibes'), daemonHome };
-  // The project a folder names, as a device would name it once given (every rule but "given to it": any project is
-  // the owner's to give, so the one it is in counts as given here).
-  const projectOf = (folder: string): CallerProjectVerdict => checkCallerProject(folder, { ownersProgram: false, principalId: 'owner-giving' },
-    { ...facts, assignedProjects: () => ['/'] });
-  return {
-    list: () => store.list(),
-    carriedOf: (principalId) => store.carriedOf(principalId),
-    give(principalId, folder) {
-      const verdict = projectOf(folder);
-      if (!verdict.ok) return { ok: false, reason: verdict.reason };
-      const projects = store.set(principalId, [...store.projectsOf(principalId), verdict.project]);
-      return { ok: true, project: verdict.project, projects };
-    },
-    take(principalId, folder) {
-      const had = store.projectsOf(principalId);
-      const real = realPathOf(folder.trim());
-      const kept = had.filter((project) => project !== real && project !== folder.trim());
-      if (kept.length === had.length) return undefined;
-      return store.set(principalId, kept);
-    },
   };
 }
 
@@ -650,10 +615,6 @@ export function createDaemonCapabilityServices(sources: DaemonCapabilityServiceS
     networkScan: networkScanServices(sources),
     // Devices and network (builtin/settings-sync.ts): the daemon's own settings (the asking program's are programSettings).
     settingsSync: { daemon: () => sources.configManager as ConfigManager },
-    // Devices and network, Permissions and safety (builtin/devices-projects.ts): the projects each device or member may work in.
-    callerProjects: callerProjectsServices(sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome()),
-    // What of the owner's shared things each caller may reach (control-plane/shared-kinds.ts), in the same daemon home.
-    callerShared: new CallerSharedStore(resolveGoodVibesDaemonHome(sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome())),
     // The daemon's one owner inbox (builtin/waiting.ts): what waits on the owner, and what was decided for them.
     ...(sources.ownerInbox ? { ownerInbox: sources.ownerInbox } : {}),
     // Work (builtin/work.ts): a piece of work proposed with its plan waits among the daemon's plans before they run.

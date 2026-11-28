@@ -63,10 +63,9 @@ import { HostedSessionWorkDetail } from './HostedSessionWorkDetail';
 import { NewWorkMenu } from './NewWorkMenu';
 // The schedules are the Automation place's (views/places): "See schedules" opens it.
 import { runCommand } from '../../lib/commands';
-import { findCommandAction } from '../../components/command/ActionSheet';
 
-/** The Scheduled group's management, in /schedule's own words. */
-const seeSchedules = findCommandAction('schedule', 'see-schedules')?.action.label;
+/** The Scheduled group's management action label. */
+const SEE_SCHEDULES_LABEL = 'See schedules';
 import { OwnerQuestions } from './OwnerQuestions';
 import { useContractScope } from '../../hooks/useContracts';
 import type { ClientLifetime } from '../../lib/client-lifetime';
@@ -555,7 +554,7 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
         <>
           <BoardGroup label="Waiting for you" rows={groups.waiting} selectedKey={selectedKey} onOpen={openItem} answerFor={answerFor} now={now} />
           <BoardGroup label="Running now" rows={groups.running} selectedKey={selectedKey} onOpen={openItem} now={now} />
-          <BoardGroup label="Scheduled" rows={groups.scheduled} selectedKey={selectedKey} onOpen={openItem} action={seeSchedules ? { label: seeSchedules, run: openSchedules } : undefined} now={now} />
+          <BoardGroup label="Scheduled" rows={groups.scheduled} selectedKey={selectedKey} onOpen={openItem} action={{ label: SEE_SCHEDULES_LABEL, run: openSchedules }} now={now} />
           <BoardGroup label="Finished" rows={groups.finished} selectedKey={selectedKey} onOpen={openItem} now={now} />
 
           <div className="work-services">

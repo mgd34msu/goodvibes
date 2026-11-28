@@ -83,8 +83,8 @@ interface Connection {
   program?: RegisteredProgram;
   /** It said it is that program's command line (`do`, `find`): judged as the program, issued as a command line. */
   commandLine?: boolean;
-  token?: string;
-  reading?: PeerReading;
+  token?: string | undefined;
+  reading?: PeerReading | undefined;
   end?: () => void;
   /** The program asked for the daemon's proof once (`hello`). */
   proved?: boolean;

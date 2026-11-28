@@ -117,7 +117,7 @@ export function createContractsStartHandler(service: ContractOperatorService): G
     // The ask is the person's words verbatim, the authority every stated criterion traces to: passed as given.
     const ask = params['ask'] as string;
     const sessionId = optionalString(params, 'sessionId');
-    const workspaceRoot = optionalString(params, 'workspaceRoot');
+    const workspaceRoot = optionalString(params, 'workspaceRoot') ?? invocation.context.call?.project;
     const isolation = optionalIsolation(params);
     const idempotencyKey = optionalString(params, 'idempotencyKey');
     if (idempotencyKey !== undefined && !isOperationKey(idempotencyKey)) {
@@ -143,7 +143,7 @@ export function createContractsDispatchHandler(service: ContractOperatorService)
     const params = readInvocationParams(invocation);
     requireString(params, 'ask');
     const ask = params['ask'] as string;
-    const workspaceRoot = optionalString(params, 'workspaceRoot');
+    const workspaceRoot = optionalString(params, 'workspaceRoot') ?? invocation.context.call?.project;
     const idempotencyKey = optionalString(params, 'idempotencyKey');
     if (idempotencyKey !== undefined && !isOperationKey(idempotencyKey)) {
       throw new GatewayVerbError(`idempotencyKey must be ${OPERATION_KEY_RULE}`, 'INVALID_ARGUMENT', 400, 'idempotencyKey');

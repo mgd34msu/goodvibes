@@ -105,6 +105,7 @@ function causeAction(words: ModeInForceWords): { label: string; section: string 
   if (words.inForce === undefined || !words.because) return undefined;
   switch (words.because) {
     case 'no decision model set': return { label: 'Choose a decision model', section: 'decision-models' };
+    case 'decision models switched off': return { label: 'Turn decision models on', section: 'decision-models' };
     case 'decision model unreachable':
     case 'decision model failing': return { label: 'Check the decision model', section: 'decision-models' };
     default: return undefined;

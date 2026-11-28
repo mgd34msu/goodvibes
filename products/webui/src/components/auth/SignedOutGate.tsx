@@ -413,9 +413,8 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
               {showPassword && (
                 <form className="signed-out-form signed-out-password" onSubmit={submitLogin}>
                   <p className="signed-out-note">
-                    Your username and the password you chose. The first time, use the first-run password
-                    GoodVibes made (in <code>~/.goodvibes/tui/auth-bootstrap.txt</code>): that sign-in sets a
-                    password of your own, and the first-run one stops working.
+                    Your username and password. On a fresh install, the generated password is in{' '}
+                    <code>~/.goodvibes/tui/auth-bootstrap.txt</code>.
                   </p>
                   <Field label="Username">
                     <Input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />

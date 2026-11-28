@@ -230,7 +230,7 @@ export function buildDaemonClusterCoordinator(
     version: VERSION,
     // Alongside the Telegram poll cursor: node identity is per-surface state
     // and must not leak across surface roots.
-    stateDirectory: runtime.runtimeServices.shellPaths.resolveProjectPath('goodvibes', 'cluster'),
+    stateDirectory: runtime.runtimeServices.shellPaths.resolveUserPath('goodvibes', 'cluster'),
     logger,
   });
   // The LAN group verbs (/api/cluster/*), when the host composed a group

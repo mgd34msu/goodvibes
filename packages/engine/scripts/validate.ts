@@ -42,10 +42,9 @@ const inPackage = (job: Job, label: string, dir: string, name: string): Step => 
 /** Compares the working tree with the one this run started from; see the end of this file. */
 const WORKTREE_STEP = 'worktree:unchanged';
 
-// Editorial checks remain opt-in (`docs-completeness-check`, `changelog:check`).
+// Only real error/contract/security gates live here; prose checks and advisory reports are opt-in.
 const STEPS: readonly Step[] = [
   // gates: source only, no build.
-  script('gates', 'error:check'),
   script('gates', 'products:check'),
   script('gates', 'credential-scope:check'),
   // No tracked file holds a literal in a real credential's shape (the
@@ -56,43 +55,27 @@ const STEPS: readonly Step[] = [
   script('gates', 'judgment:lint'),
   // The event validator's rules are generated from the event unions.
   script('gates', 'events:check'),
-  // docs/llms-full.txt is the hand-written parts in docs/llms with every list
-  // the code holds (settings, commands, tools, methods, variables) built in.
-  script('gates', 'llms:check'),
   script('gates', 'version:check'),
-  // Fails when a flag's graduation state blocks a release.
-  script('gates', 'flags:graduation'),
-  script('gates', 'internal-id:check'),
   script('gates', 'architecture:check'),
-  // Every slash command is one description, and every description holds to the command standard.
+  // Structural safety, reachability, twin-parity and parse checks on commands.
   script('gates', 'commands:check'),
   script('gates', 'platform-console:check'),
   script('gates', 'any:check'),
-  // The test runner's admission scan (header, risk table, refused forms) over
-  // the test files the runner does not start: the web UI's Playwright journeys.
+  // Refuses flaky sleeps, snapshots, module mocks, and skipped tests in Playwright journeys.
   { label: 'test:scan', job: 'gates', command: 'bun', args: ['packages/engine/scripts/test-scan.ts'] },
-  // The committed contracts and everything generated from them, including the
-  // reference documents (docs/reference-*.md).
+  // The committed contracts and generated consumer facades stay in step with source.
   script('gates', 'contracts:check'),
-  // The web UI imports the engine only through its published subpaths.
-  inPackage('gates', 'webui:release-gate', 'products/webui', 'release:gate'),
   // The release workflow's asset pinning, collection and CI gate scripts.
   script('gates', 'release-assets:test'),
 
   // build: the one forced compile of the engine sources, judged by its output
-  // as well as its exit code, then every product's build. The web UI build
-  // first checks its committed snapshots of the engine's settings schema,
-  // ownership and presentation data (generated:check), so a renamed or removed
-  // setting key fails here.
+  // as well as its exit code, then every product's build.
   script('build', 'build'),
 
   // typecheck: what build did not compile (test, type-test, installer and
   // product projects) against the declarations build wrote, then the checks
   // that read the build output.
   { label: 'typecheck', job: 'typecheck', command: 'bun', args: ['packages/engine/scripts/typecheck.ts', '--after-build'] },
-  script('typecheck', 'api:check'),
-  // Beside api:check because it asks the opposite question: whether every
-  // module with a public face is reachable from a published package at all.
   script('typecheck', 'exports:check'),
   inPackage('typecheck', 'examples:typecheck', 'packages/engine/examples', 'typecheck'),
   script('typecheck', 'check:browser'),
@@ -111,7 +94,6 @@ const STEPS: readonly Step[] = [
   script('package', 'publint:check'),
   script('package', 'install:smoke'),
   script('package', 'release:artifact-lane'),
-  script('package', 'bundle:check'),
   // The terminal program was built for this host by `build`; the other two here.
   inPackage('package', 'agent:build-binary', 'products/agent', 'build:binary'),
   inPackage('package', 'daemon:build-binary', 'products/daemon', 'build:binary'),

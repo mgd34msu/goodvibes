@@ -15,7 +15,8 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { HeldPathRefusal, holdCallerPath, holdingCallerPaths } from './held-paths.js';
-import { CapabilityRefusal, type CapabilityCaller, type CapabilityEntry } from './types.js';
+import { CapabilityRefusal, type CapabilityCaller } from './types.js';
+import type { CapabilityEntry } from './catalog.js';
 
 /**
  * Where a path really is: its real path when it exists, else its nearest existing folder's real path with the rest

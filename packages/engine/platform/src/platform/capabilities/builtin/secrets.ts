@@ -389,9 +389,21 @@ export const SECRETS_DELETE: CapabilityDefinition<SecretsCapabilityServices> = {
     const sweepAll = resolveSecretDeleteScope(key, 'project') === undefined;
     const scopes: readonly (SecretScope | undefined)[] = sweepAll ? [undefined]
       : values.scope === 'user' ? ['daemon', 'user'] : values.scope === 'project' ? ['project'] : [undefined];
+    const deletedScopes: string[] = [];
     try {
-      for (const scope of scopes) await view.delete(key, { ...(scope ? { scope } : {}), ...(medium ? { medium } : {}) });
+      for (const scope of scopes) {
+        await view.delete(key, { ...(scope ? { scope } : {}), ...(medium ? { medium } : {}) });
+        deletedScopes.push(scope ?? 'all');
+      }
     } catch (error) {
+      if (deletedScopes.length > 0) {
+        services.secrets.changed(key, 'deleted');
+        throw new CapabilityRefusal(
+          `${key} was partially deleted (removed from ${deletedScopes.join(', ')}, but failed on a remaining store): ${summarizeError(error)}`,
+          undefined,
+          'PARTIALLY_DONE',
+        );
+      }
       throw new CapabilityRefusal(`${key} was not deleted: ${summarizeError(error)}`);
     }
     services.secrets.changed(key, 'deleted');

@@ -247,7 +247,7 @@ interface TelemetryApiServiceOptions {
    * store's gate flag cannot: the gate reports a request only after its
    * decision. Omitted, the pending count falls back to that flag.
    */
-  readonly listApprovals?: (() => readonly { readonly status: string }[]) | undefined;
+  readonly listApprovals?: (() => readonly { readonly id: string; readonly status: string }[]) | undefined;
 }
 
 export class TelemetryRawViewDisabledError extends Error {
@@ -266,7 +266,7 @@ export class TelemetryApiService {
   private readonly eventLimit: number;
   private readonly errorLimit: number;
   private readonly spanLimit: number;
-  private readonly listApprovals: (() => readonly { readonly status: string }[]) | undefined;
+  private readonly listApprovals: (() => readonly { readonly id: string; readonly status: string }[]) | undefined;
   private readonly records: TelemetryRecord[] = [];
   private readonly errors: TelemetryRecord[] = [];
   private readonly spans: ReadableSpan[] = [];

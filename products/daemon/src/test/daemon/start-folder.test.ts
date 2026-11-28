@@ -22,7 +22,7 @@ test('the daemon works in its own folder in its home whatever folder it is start
   const env = { GOODVIBES_HOME: home, GOODVIBES_DAEMON_HOME: daemonHome, HOME: home } as NodeJS.ProcessEnv;
   const own = join(daemonHome, 'own-folder');
   const workingFolder = (flags: { workingDir?: string }, extra: NodeJS.ProcessEnv = {}): string => {
-    try { return createDaemonCliConfiguration(flags, { ...env, ...extra }, start).workingDirectory; }
+    try { return createDaemonCliConfiguration({ daemonHome: undefined, workingDir: flags.workingDir }, { ...env, ...extra }, start).workingDirectory; }
     catch (error) { return error instanceof Error ? error.message : String(error); }
   };
   const rows = [

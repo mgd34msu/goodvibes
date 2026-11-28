@@ -271,7 +271,7 @@ type AgentOrchestratorToolDeps = {
   /** The conversation each call belongs to, for a registry every web chat and run of a project shares (registerAllTools). */
   readonly turnSessionId?: (() => string | undefined) | undefined;
   /** Starts the contracts the agent and workflow tools hand work to (registerAllTools). */
-  readonly contractRunner?: Pick<import('../contract/runner.js').ContractRunner, 'start' | 'list' | 'get'> | undefined;
+  readonly contractRunner?: Pick<import('../contract/runner.js').ContractRunner, 'start' | 'list' | 'get'> | null | undefined;
   /** The artifact store a native request's files are read from, for the agents that do its work. */
   readonly artifacts?: Pick<import('../companion/companion-chat-attachments.js').CompanionChatArtifactStore, 'readContent'> | undefined;
   readonly sessionOrchestration: import('../sessions/orchestration/index.js').CrossSessionTaskRegistry;

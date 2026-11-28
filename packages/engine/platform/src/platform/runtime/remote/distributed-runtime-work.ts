@@ -311,7 +311,20 @@ export async function claimDistributedWork(
     }));
   }
   // A pull that claimed and refused nothing changed nothing worth writing.
-  if (claimed.length > 0 || refused) await persistDistributedRuntime(state);
+  if (claimed.length > 0 || refused) {
+    try {
+      await persistDistributedRuntime(state);
+    } catch (error) {
+      // Roll back in-memory claimed state so work is not stranded until lease expiry when persistence fails.
+      for (const item of claimed) {
+        if (state.work.get(item.id) === item) {
+          const { claimTokenId: _t, claimedAt: _c, leaseExpiresAt: _l, ...rest } = item;
+          state.work.set(item.id, { ...rest, status: 'queued' });
+        }
+      }
+      throw error;
+    }
+  }
   if (claimed.length > 0) {
     publishDistributedRuntimeEvent(state, 'remote-work-claimed', {
       peer: sanitizePeer(state.peers.get(peer.id) ?? peer),
@@ -427,15 +440,18 @@ export async function completeDistributedWork(
     },
   ));
   const bridgePeer = state.peers.get(auth.peer.id) ?? standInBridgePeer(auth.peer.id, current.peerKind, Date.now());
-  await pruneAndPersistDistributedRuntime(state);
-  await bridgeSettledAndRemember(state, bridgePeer, recorded);
-  const settled = state.work.get(workId) ?? recorded;
-  publishDistributedRuntimeEvent(state, 'remote-work-settled', {
-    peer: sanitizePeer(state.peers.get(auth.peer.id) ?? bridgePeer),
-    work: settled,
-  });
-  resolveDistributedRuntimeWaiters(state, updated);
-  return settled;
+  try {
+    await pruneAndPersistDistributedRuntime(state);
+    await bridgeSettledAndRemember(state, bridgePeer, recorded);
+    const settled = state.work.get(workId) ?? recorded;
+    publishDistributedRuntimeEvent(state, 'remote-work-settled', {
+      peer: sanitizePeer(state.peers.get(auth.peer.id) ?? bridgePeer),
+      work: settled,
+    });
+    return settled;
+  } finally {
+    resolveDistributedRuntimeWaiters(state, updated);
+  }
 }
 
 /**
@@ -483,10 +499,13 @@ export async function cancelDistributedWork(
     note: updated.error,
   }));
   const bridgePeer = state.peers.get(updated.peerId) ?? standInBridgePeer(updated.peerId, updated.peerKind, Date.now());
-  await pruneAndPersistDistributedRuntime(state);
-  await bridgeSettledAndRemember(state, bridgePeer, updated);
-  const settled = state.work.get(workId) ?? updated;
-  publishDistributedRuntimeEvent(state, 'remote-work-cancelled', settled);
-  resolveDistributedRuntimeWaiters(state, settled);
-  return settled;
+  try {
+    await pruneAndPersistDistributedRuntime(state);
+    await bridgeSettledAndRemember(state, bridgePeer, updated);
+    const settled = state.work.get(workId) ?? updated;
+    publishDistributedRuntimeEvent(state, 'remote-work-cancelled', settled);
+    return settled;
+  } finally {
+    resolveDistributedRuntimeWaiters(state, state.work.get(workId) ?? updated);
+  }
 }

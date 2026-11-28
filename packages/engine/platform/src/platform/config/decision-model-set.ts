@@ -31,12 +31,17 @@ const text = (value: unknown): string => (typeof value === 'string' ? value.trim
  * No decision model chosen (`judgment.noDecisionModel`) is not set, whatever
  * else the settings or the environment hold.
  */
-export function decisionModelSet(settings: DecisionModelSettings, env: Readonly<Record<string, string | undefined>>): boolean {
+export function decisionModelSet(
+  settings: DecisionModelSettings,
+  env: Readonly<Record<string, string | undefined>>,
+  options: { readonly hasStoredKey?: boolean | undefined } = {},
+): boolean {
   if (settings.noDecisionModel === true) return false;
   if (text(settings.endpoint) || text(env['TYPESAFE_BASE_URL'])) return true;
   if (Array.isArray(settings.fallbacks) && settings.fallbacks.length > 0) return true;
   if (settings.keySource === 'secret' || settings.keySource === 'none') return true;
   if (text(env[text(settings.keyName) || 'TYPESAFE_API_KEY'])) return true;
+  if (options.hasStoredKey === true) return true;
   return Boolean(text(settings.model) || text(env['TYPESAFE_DEFAULT_MODEL']));
 }
 

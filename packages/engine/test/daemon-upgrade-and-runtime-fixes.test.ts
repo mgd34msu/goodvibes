@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { restartDaemonAfterSuiteUpdate } from '../terminal-shell/src/release-update-preflight.js';
-import { createDaemonWorkDelegation } from '../terminal-shell/src/agent-turn/daemon-work-delegation.js';
+import { createDaemonWorkDelegation, formatDelegatedWorkProgress } from '../terminal-shell/src/agent-turn/daemon-work-delegation.js';
+import { decisionModelSet } from '../platform/src/platform/config/decision-model-set.js';
 import { useConnectedHostRefusal } from '../terminal-shell/src/agent-turn/connected-host-client.js';
 import { buildRecorderCommand } from '../platform/src/platform/voice/capture/recorder-command.js';
 import { fetchOpenAISubscriptionModelIds } from '../platform/src/platform/providers/openai-codex.js';
@@ -152,5 +153,30 @@ describe('daemon upgrade, version mismatch, openai subscription discovery, and v
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test('formatDelegatedWorkProgress reports concise title and live step progress from run.steps', () => {
+    const multilineTitle = 'review this codebase, give it a score out of 10\n\nPlanned for the agents:\n- backend\n- frontend';
+    expect(formatDelegatedWorkProgress(multilineTitle, 'running', { steps: [] }))
+      .toBe('"review this codebase, give it a score out of 10": planning steps on the daemon');
+
+    expect(formatDelegatedWorkProgress(multilineTitle, 'running', {
+      steps: [
+        { id: 'u1', title: 'Review backend', status: 'passed' },
+        { id: 'u2', title: 'Review frontend', status: 'passed' },
+        { id: 'u3', title: 'Synthesize score', status: 'running' },
+      ],
+    })).toBe('"review this codebase, give it a score out of 10": 2/3 steps done · running: Synthesize score');
+
+    expect(formatDelegatedWorkProgress(multilineTitle, 'needs-you', {
+      statusLine: 'The work finished; waiting for acceptance.',
+      steps: [{ id: 'u1', title: 'Review', status: 'passed' }],
+    })).toContain('needs you in Work (Ctrl+G then w) (1/1 steps done)');
+  });
+
+  test('decisionModelSet recognizes a stored daemon secret key when systemd env lacks TYPESAFE_API_KEY', () => {
+    expect(decisionModelSet({ keySource: 'env' }, {})).toBe(false);
+    expect(decisionModelSet({ keySource: 'env' }, {}, { hasStoredKey: true })).toBe(true);
+    expect(decisionModelSet({ keySource: 'env', noDecisionModel: true }, {}, { hasStoredKey: true })).toBe(false);
   });
 });

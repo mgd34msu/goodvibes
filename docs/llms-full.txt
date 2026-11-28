@@ -1,6 +1,6 @@
 # GoodVibes: overview, terms, architecture and where everything is stored
 
-This file describes GoodVibes release 3.6.2 completely. It is written for a language model that operates GoodVibes for a person. Everything a person or an automated client can reach is described here: installing, every program and command, every setting, every slash command, every model tool, every environment variable, every file GoodVibes writes, the operator API and every error. Nothing outside this file is needed.
+This file describes GoodVibes release 3.6.3 completely. It is written for a language model that operates GoodVibes for a person. Everything a person or an automated client can reach is described here: installing, every program and command, every setting, every slash command, every model tool, every environment variable, every file GoodVibes writes, the operator API and every error. Nothing outside this file is needed.
 
 How to read this file:
 
@@ -481,7 +481,7 @@ Terms used here:
 - The install directory is the directory that holds the programs. It is `~/.local/bin` unless an option changes it.
 - A release is a tagged GoodVibes version such as `v3.6.0`, published at `https://github.com/mgd34msu/goodvibes/releases`.
 
-This part describes release 3.6.2.
+This part describes release 3.6.3.
 
 ## Choosing an installation method
 
@@ -2586,7 +2586,7 @@ How each option behaves:
 | `--non-interactive` | Disables every interactive prompt and implies `--yes`. |
 | `--strict` | `doctor` only: also fail on advisory findings. Any other command ignores it. |
 | `-h, --help` | Prints help: first `Most used:` (start the app, `run "<prompt>"`, `pair`, `status`, `goodvibes-daemon update --check`; the Agent adds `setup`), then every command, the options and examples. `goodvibes help <command>` prints one command's help. |
-| `-v, --version` | Prints `goodvibes 3.6.2`. |
+| `-v, --version` | Prints `goodvibes 3.6.3`. |
 
 Only one of `--continue`, `--resume` and `--fork` may be given on one launch.
 
@@ -3143,7 +3143,7 @@ goodvibes completion fish > ~/.config/fish/completions/goodvibes.fish
 ### `goodvibes help` and `goodvibes version`
 
 `goodvibes help` prints the overview; `goodvibes help <command>` prints one command's usage and examples.
-`goodvibes version` prints `goodvibes 3.6.2`.
+`goodvibes version` prints `goodvibes 3.6.3`.
 `goodvibes help version` has no detailed help and prints the overview.
 
 ## The interface
@@ -9581,7 +9581,7 @@ goodvibes-daemon completion fish > ~/.config/fish/completions/goodvibes-daemon.f
 
 `check-install-reader <installed-executable>` is run by the release installer: it checks whether this release can read an installation's saved data without loading settings or changing files. `--describe` lists the readers compiled in. A person does not need to run it.
 
-`help [command] [--json]` prints help. `version` (and `-v`, `--version`) prints `goodvibes-daemon 3.6.2`.
+`help [command] [--json]` prints help. `version` (and `-v`, `--version`) prints `goodvibes-daemon 3.6.3`.
 
 ## Network exposure
 
@@ -12070,7 +12070,7 @@ The client sends the token as `Authorization: Bearer <token>`, which is what the
 
 ## SDK entry points
 
-The package `@goodvibes/engine` (version 3.6.2) contains typed clients for this API. It does not call model providers itself; the daemon does.
+The package `@goodvibes/engine` (version 3.6.3) contains typed clients for this API. It does not call model providers itself; the daemon does.
 
 How it is published: two packages of the repository are publishable, `@goodvibes/engine` (`packages/engine`) and `@goodvibes/judgment` (`packages/judgment`); the products (`goodvibes`, `goodvibes-agent`, the daemon, the web UI) are private and never published. The release workflow publishes the two packages to `https://registry.npmjs.org` with provenance only when a release runs from a version tag and the repository variable `PUBLISH_NPM` is `true`; otherwise a release produces the native GitHub release and its installer assets and publishes nothing to npm. The repository does not record that variable's value, so whether a given version is on npm is answered by the registry, not by the source:
 
@@ -12081,8 +12081,8 @@ npm view @goodvibes/engine versions --json
 When the version you need is there, install it like any package:
 
 ```sh
-bun add @goodvibes/engine@3.6.2
-npm install @goodvibes/engine@3.6.2
+bun add @goodvibes/engine@3.6.3
+npm install @goodvibes/engine@3.6.3
 ```
 
 When it is not, use it from a source checkout of the same version, inside that checkout's workspace:
@@ -12090,7 +12090,7 @@ When it is not, use it from a source checkout of the same version, inside that c
 ```sh
 git clone https://github.com/mgd34msu/goodvibes.git
 cd goodvibes
-git checkout v3.6.2
+git checkout v3.6.3
 bun install
 bun run build                 # produces the dist/ directories the package's exports name
 mkdir -p products/my-client
@@ -12164,7 +12164,7 @@ Every operator method (id, REST route or invoke-only, scopes) is listed in "Oper
 
 # Reference
 
-This appendix holds every complete list GoodVibes keeps in its code. Each list below is built from the program itself each time this file is generated, so it matches release 3.6.2 exactly. The other parts of this file explain how to use these things; this part is where to look up an exact name, flag, default or value.
+This appendix holds every complete list GoodVibes keeps in its code. Each list below is built from the program itself each time this file is generated, so it matches release 3.6.3 exactly. The other parts of this file explain how to use these things; this part is where to look up an exact name, flag, default or value.
 
 ## Settings
 

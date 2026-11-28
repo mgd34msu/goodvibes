@@ -1,5 +1,28 @@
 # Changelog
 
+## [3.6.3] - 2026-11-28
+
+The full write-up is in
+[docs/releases/3.6.3.md](https://github.com/mgd34msu/goodvibes/blob/v3.6.3/docs/releases/3.6.3.md).
+
+### Fixed
+
+- **Live step progress for daemon-delegated work:** `daemon-work-delegation`
+  now uses a concise single-line title and reports live step transitions from
+  `run.steps` (planning, `N/M steps done · running: ...`, checking, and `needs
+  you in Work (Ctrl+G then w)`) instead of freezing on a static `"running on
+  the daemon"` line while agents execute.
+- **Decision model secret-store fallback under service managers:**
+  `composeJudgment` and `decisionModelSet` now recognize and load a stored
+  `TYPESAFE_API_KEY` (or configured `judgment.keyName`) from the daemon secret
+  store when the default `env` key is absent under `systemd` / `launchd`,
+  preventing finished daemon work from pausing in `needs-you` when the decision
+  model key is stored in the daemon vault.
+- **Lower idle waiting CPU in the terminal app:** Reduced `ActivityAnimation`
+  spinner redraw cadence from 80 ms (12.5 Hz) to 250 ms (4 Hz, and 1 s under
+  `display.reduceMotion`), cutting terminal redraw CPU overhead while waiting
+  on daemon work.
+
 ## [3.6.2] - 2026-11-27
 
 The full write-up is in

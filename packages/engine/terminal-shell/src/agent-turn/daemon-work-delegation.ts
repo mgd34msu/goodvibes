@@ -42,10 +42,59 @@ const list = (value: unknown): readonly unknown[] => Array.isArray(value) ? valu
 
 /** Where a piece of work stands, as the Work place says it (work-place.ts STATE_WORDS). */
 const STATE_WORDS: Readonly<Record<string, string>> = {
-  'not-started': 'in Work, not started', 'plan-waiting': 'its plan waits for you in Work', starting: 'starting on the daemon',
-  interrupted: 'cut off when the daemon stopped; go on with it in Work', running: 'running on the daemon',
-  'needs-you': 'needs you: answer it in Work', 'step-failed': 'a step failed: run it again, go on without it or stop it in Work',
+  'not-started': 'in Work, not started', 'plan-waiting': 'its plan waits for you in Work (Ctrl+G then w)', starting: 'starting on the daemon',
+  interrupted: 'cut off when the daemon stopped; go on with it in Work (Ctrl+G then w)', running: 'running on the daemon',
+  'needs-you': 'needs you in Work (Ctrl+G then w)', 'step-failed': 'a step failed: run it again, go on without it or stop it in Work (Ctrl+G then w)',
 };
+
+/** Short single-line title for progress displays (never dumps a multi-line delegated brief). */
+function shortTitleOf(raw: string): string {
+  const first = raw.split(/\r?\n/u).map((line) => line.trim()).find(Boolean) ?? raw.trim();
+  return first.length > 72 ? `${first.slice(0, 69)}...` : first;
+}
+
+/** Summarize live step progress from `work.run.steps` so the terminal shows real progress instead of a static line. */
+function stepProgressSummary(state: string, runView: Answer): string {
+  const steps = list(runView['steps']).map(record);
+  if (steps.length === 0) {
+    return state === 'running' || state === 'starting' ? 'planning steps on the daemon' : (STATE_WORDS[state] ?? state);
+  }
+  const done = steps.filter((step) => {
+    const status = text(step['status']);
+    return status === 'passed' || status === 'completed';
+  }).length;
+  const running = steps.filter((step) => text(step['status']) === 'running');
+  const checking = steps.filter((step) => {
+    const status = text(step['status']);
+    return status === 'nudged' || status === 'checking';
+  });
+  const count = `${done}/${steps.length} steps done`;
+  if (state !== 'running' && state !== 'starting') {
+    return `${STATE_WORDS[state] ?? state} (${count})`;
+  }
+  const namesOf = (entries: readonly Answer[]): string => entries
+    .slice(0, 2)
+    .map((step) => shortTitleOf(text(step['title']) || text(step['id'])))
+    .filter(Boolean)
+    .join(', ');
+  if (running.length > 0) {
+    const more = running.length > 2 ? ` (+${running.length - 2} more)` : '';
+    return `${count} · running: ${namesOf(running)}${more}`;
+  }
+  if (checking.length > 0) {
+    return `${count} · checking: ${namesOf(checking)}`;
+  }
+  return done >= steps.length ? `${count} · finalizing on the daemon` : `${count} · running on the daemon`;
+}
+
+/** Format the live progress line reported to the terminal while a delegated work runs on the daemon. */
+export function formatDelegatedWorkProgress(title: string, state: string, runView: Answer): string {
+  const shortTitle = shortTitleOf(title);
+  const held = text(runView['held']);
+  const statusLine = text(runView['statusLine']);
+  const summary = stepProgressSummary(state, runView);
+  return [`"${shortTitle}": ${summary}`, statusLine, held ? `Held back: ${held}` : ''].filter(Boolean).join('. ');
+}
 
 /** Where a piece of work waits on the owner in Work: a headless run stops waiting there and says so. */
 // Not "not started": a work handed over is started at once, and reads so only until its run is first seen.
@@ -127,9 +176,9 @@ export function createDaemonWorkDelegation(options: DaemonWorkDelegationOptions)
       if (!ran.ok) throw new Error(ran.error);
       const workId = text(ran.data['work']);
       if (!workId) throw new Error(ran.text || 'The daemon did not say which piece of work it made.');
-      const title = text(ran.data['title']) || owner.task.split('\n')[0]!.trim();
+      const title = shortTitleOf(text(ran.data['title']) || owner.task);
       const planWaiting = ran.data['planWaiting'] === true;
-      report({ kind: 'progress', line: planWaiting ? `"${title}": its plan waits for you in Work` : `"${title}": handed to the daemon; it shows in Work`, waiting: planWaiting });
+      report({ kind: 'progress', line: planWaiting ? `"${title}": its plan waits for you in Work (Ctrl+G then w)` : `"${title}": handed to the daemon; planning steps`, waiting: planWaiting });
 
       let ended = false;
       let settle!: () => void;
@@ -175,8 +224,7 @@ export function createDaemonWorkDelegation(options: DaemonWorkDelegationOptions)
               return;
             }
             if (state === 'stopped') { finish({ kind: 'stopped', reason: `the work "${title}" was stopped` }); return; }
-            const held = text(runView['held']);
-            const line = [`"${title}": ${STATE_WORDS[state] ?? state}`, text(runView['statusLine']), held ? `Held back: ${held}` : ''].filter(Boolean).join('. ');
+            const line = formatDelegatedWorkProgress(title, state, runView);
             if (line !== lastLine) { lastLine = line; report({ kind: 'progress', line, waiting: WAITS_ON_OWNER.has(state) }); }
           } while (again && !ended);
         } finally {

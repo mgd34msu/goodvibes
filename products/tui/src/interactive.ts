@@ -1058,9 +1058,9 @@ async function main(prepared: PreparedShellCliRuntime) {
       tokenSpeed: (configManager.get('display.showTokenSpeed') as boolean) ? streamMetrics.tokenSpeed : undefined,
       now: throbberNow,
     });
-    activityAnimation.setActive(throbberActivity !== null && !orchestrator.isThinking);
     // display.reduceMotion: the spinner is one still mark and its colour does not sweep; the elapsed time still counts.
     const reduceMotion = configManager.get('display.reduceMotion') === true;
+    activityAnimation.setActive(throbberActivity !== null && !orchestrator.isThinking, reduceMotion);
     conversation.workTree.reduceMotion = reduceMotion;
     const activityFrame = reduceMotion ? 0 : orchestrator.isThinking ? orchestrator.thinkingFrame : activityAnimation.frame;
     const throbber = throbberActivity

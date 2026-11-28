@@ -96,8 +96,15 @@ async function storedKey(secrets: JudgmentSettingsSource['secrets'], name: strin
 
 async function settingsKey(secrets: JudgmentSettingsSource['secrets'], keySource: JudgmentKeySource, keyName: string, envKey: string | undefined, timeoutMs: number, signal?: AbortSignal): Promise<string | undefined> {
   if (keySource === 'none') return undefined;
-  if (keySource !== 'secret') return envKey;
-  return storedKey(secrets, keyName, timeoutMs, signal);
+  if (keySource === 'secret') return storedKey(secrets, keyName, timeoutMs, signal);
+  if (envKey && envKey.trim() !== '') return envKey;
+  // When running under a service manager (systemd/launchd) that does not inherit shell env vars,
+  // allow a key stored in the daemon secret store to satisfy the default 'env' keySource too.
+  try {
+    return await storedKey(secrets, keyName, timeoutMs, signal);
+  } catch {
+    return envKey;
+  }
 }
 
 /**
@@ -427,7 +434,15 @@ function browserBoundaryOptions(source: JudgmentSettingsSource): WebuiAnswerBoun
  * readings, and retiring one hands the process to the newest still running.
  */
 export function composeJudgment(input: JudgmentServicesInput): JudgmentServices {
-  const restorePolicy = configureDecisionModelPolicy(() => input.config.get('judgment.policy'), () => decisionModelSet(decisionModelSettings(key => input.config.get(key)), input.env));
+  const hasStoredDecisionKey = (): boolean => {
+    const keyName = text(input.config.get('judgment.keyName')) || JUDGMENT_KEY_NAME;
+    const resolver = input.secrets as { resolveLocalSecretSync?: (name: string) => { readonly state: string } };
+    try { return resolver.resolveLocalSecretSync?.(keyName).state === 'resolved'; } catch { return false; }
+  };
+  const restorePolicy = configureDecisionModelPolicy(
+    () => input.config.get('judgment.policy'),
+    () => decisionModelSet(decisionModelSettings(key => input.config.get(key)), input.env, { hasStoredKey: hasStoredDecisionKey() }),
+  );
   input.disposal.add('decision-model policy', () => { restorePolicy(); resetDecisionModelEpisode(); });
   const { log: decisionLog, notice: decisionLogNotice } = openStateDecisionLogWithNotice(input.stateRoot);
   const transport = createSettingsJudgmentPort(input);

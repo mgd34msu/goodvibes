@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.6.5] - 2026-11-28
+
+The full write-up is in
+[docs/releases/3.6.5.md](https://github.com/mgd34msu/goodvibes/blob/v3.6.5/docs/releases/3.6.5.md).
+
+### Fixed
+
+- **Prevent false `NATIVE_EXECUTION_REFUSED` on authorized daemon Work starts:**
+  Clarified `work-ledger.native-start` instructions in
+  `workflow/work-ledger/native-execution.ts` so the decision model recognizes
+  host-verified authority, workspace scope, and active work claim (`existingActiveClaim: true`) and admits ordinary authorized work with high confidence while still rejecting harmful requests.
+
 ## [3.6.4] - 2026-11-28
 
 The full write-up is in

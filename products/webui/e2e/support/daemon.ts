@@ -78,6 +78,18 @@ function sse(value: unknown): string {
 
 type WireMessage = { role: string; content?: unknown };
 
+const HOST_MESSAGE_HEADER = '[Host] Written by GoodVibes for this request only; not from the user.';
+
+function wireMessageText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (part && typeof part === 'object' && 'text' in part ? String((part as { text: unknown }).text) : ''))
+      .join('');
+  }
+  return JSON.stringify(content ?? '');
+}
+
 /** The model at the HTTP wire: an exec call for a message carrying a marker, then the scripted answer. */
 function startModel(commands: readonly ScriptedCommand[]): Promise<{ server: Server; baseURL: string }> {
   let calls = 0;
@@ -92,9 +104,13 @@ function startModel(commands: readonly ScriptedCommand[]): Promise<{ server: Ser
       }
       const body = JSON.parse(raw || '{}') as { messages?: WireMessage[]; model?: string };
       const messages = body.messages ?? [];
-      const lastUser = messages.map((message) => message.role).lastIndexOf('user');
-      const userText = lastUser >= 0 ? JSON.stringify(messages[lastUser]!.content ?? '') : '';
-      const after = messages.slice(lastUser + 1);
+      let lastUser = -1;
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        if (messages[i]!.role !== 'user') continue;
+        if (!wireMessageText(messages[i]!.content).startsWith(HOST_MESSAGE_HEADER)) { lastUser = i; break; }
+      }
+      const userText = lastUser >= 0 ? wireMessageText(messages[lastUser]!.content) : '';
+      const after = lastUser >= 0 ? messages.slice(lastUser + 1) : [];
       const scripted = commands.find((entry) => userText.includes(entry.marker));
       const base = { id: 'chatcmpl-e2e', object: 'chat.completion.chunk', created: 0, model: body.model ?? MODEL_ID };
       let out = sse({ ...base, choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] });

@@ -412,9 +412,19 @@ export class SubscriptionManager {
     }
     const secret = this.readTokenSecret(record.provider);
     const entry = secret?.revision === record.tokenRevision ? secret
-      : secret?.previous?.revision === record.tokenRevision ? secret.previous : undefined;
+      : secret?.previous?.revision === record.tokenRevision ? secret.previous
+        // Crash/restart recovery: a previous refresh persisted a newer token revision in the secret store
+        // (and a follow-up write evicted the older revision from `previous`) before subscriptions.json
+        // updated `tokenRevision`. Recover the newer tokens instead of treating a live sign-in as signed out.
+        : secret && secret.revision > record.tokenRevision ? secret
+          : undefined;
     if (!entry) return null;
-    return { ...record, accessToken: entry.accessToken, ...(entry.refreshToken ? { refreshToken: entry.refreshToken } : {}) };
+    return {
+      ...record,
+      tokenRevision: entry.revision,
+      accessToken: entry.accessToken,
+      ...(entry.refreshToken ? { refreshToken: entry.refreshToken } : {}),
+    };
   }
 
   /** The last token secret read or written per provider, for a read made while this process is writing it. */
@@ -822,7 +832,11 @@ export class SubscriptionManager {
     if (current.refreshingUntil !== undefined && current.refreshingUntil > now) {
       return { kind: 'leased', record: current, until: current.refreshingUntil };
     }
-    store.subscriptions[provider] = { ...stored, refreshingUntil: now + REFRESH_LEASE_MS };
+    store.subscriptions[provider] = {
+      ...stored,
+      ...(current.tokenRevision !== undefined ? { tokenRevision: current.tokenRevision } : {}),
+      refreshingUntil: now + REFRESH_LEASE_MS,
+    };
     return { kind: 'claimed', record: current };
   }
 

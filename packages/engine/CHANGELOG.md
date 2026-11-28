@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.6.2] - 2026-11-27
+
+The full write-up is in
+[docs/releases/3.6.2.md](https://github.com/mgd34msu/goodvibes/blob/v3.6.2/docs/releases/3.6.2.md).
+
+### Fixed
+
+- **OAuth subscription token-revision crash recovery:** `SubscriptionManager`
+  now recovers newer persisted token revisions from the secret store when
+  `shared/subscriptions.json` lagged behind after a daemon restart or crash
+  mid-refresh (and advances `tokenRevision` on the next refresh claim),
+  preventing live OAuth subscriptions such as OpenAI's from appearing signed
+  out with `"No model is set up yet."`.
+
 ## [3.6.1] - 2026-11-27
 
 The full write-up is in

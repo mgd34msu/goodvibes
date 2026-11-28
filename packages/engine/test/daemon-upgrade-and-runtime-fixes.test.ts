@@ -1,9 +1,14 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { restartDaemonAfterSuiteUpdate } from '../terminal-shell/src/release-update-preflight.js';
 import { createDaemonWorkDelegation } from '../terminal-shell/src/agent-turn/daemon-work-delegation.js';
 import { useConnectedHostRefusal } from '../terminal-shell/src/agent-turn/connected-host-client.js';
 import { buildRecorderCommand } from '../platform/src/platform/voice/capture/recorder-command.js';
 import { fetchOpenAISubscriptionModelIds } from '../platform/src/platform/providers/openai-codex.js';
+import { SubscriptionManager } from '../platform/src/platform/config/subscriptions.js';
+import { Secret } from '../platform/src/platform/security/secret.js';
 import type { AgentRecord } from '../platform/src/platform/tools/index.js';
 import type { ShellPathService } from '../platform/src/platform/runtime/shell-paths.js';
 
@@ -102,6 +107,50 @@ describe('daemon upgrade, version mismatch, openai subscription discovery, and v
       expect(models).toEqual(['gpt-5.4']);
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('SubscriptionManager recovers newer secret tokenRevision when subscriptions.json lagged behind after a restart', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gv-sub-rev-'));
+    try {
+      const subPath = join(dir, 'subscriptions.json');
+      writeFileSync(subPath, JSON.stringify({
+        version: 1,
+        subscriptions: {
+          openai: {
+            provider: 'openai',
+            tokenType: 'Bearer',
+            expiresAt: Date.now() + 3_600_000,
+            scopes: ['openid'],
+            authMode: 'oauth',
+            overrideAmbientApiKeys: false,
+            createdAt: Date.now() - 10_000,
+            updatedAt: Date.now() - 10_000,
+            tokenRevision: 1,
+          },
+        },
+        pending: {},
+      }));
+      const storedSecret = JSON.stringify({
+        revision: 3,
+        accessToken: 'recovered-access-token',
+        refreshToken: 'recovered-refresh-token',
+        previous: { revision: 2, accessToken: 'prev-access-token', refreshToken: 'prev-refresh-token' },
+      });
+      const secrets = {
+        resolveLocalSecretSync: (key: string) => key === 'GOODVIBES_SUBSCRIPTION_TOKENS_OPENAI'
+          ? { state: 'resolved' as const, value: Secret.of(storedSecret, key) }
+          : { state: 'absent' as const },
+        set: async () => {},
+        delete: async () => {},
+      };
+      const manager = new SubscriptionManager(subPath, { secrets });
+      const grant = manager.get('openai');
+      expect(grant).not.toBeNull();
+      expect(grant!.accessToken.reveal('dispatch')).toBe('recovered-access-token');
+      expect(grant!.refreshToken?.reveal('dispatch')).toBe('recovered-refresh-token');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

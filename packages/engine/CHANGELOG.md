@@ -1,5 +1,32 @@
 # Changelog
 
+## [3.6.4] - 2026-11-28
+
+The full write-up is in
+[docs/releases/3.6.4.md](https://github.com/mgd34msu/goodvibes/blob/v3.6.4/docs/releases/3.6.4.md).
+
+### Fixed
+
+- **Service-managed daemon login-shell environment hydration:** When
+  `goodvibes-daemon` starts under `systemd` or `launchd`, it now hydrates
+  missing variables from the user's login shell into process memory (never
+  overwriting service-unit variables or writing secrets to disk), so
+  environment variables exported in `~/.bashrc`, `~/.zshrc`, or `config.fish`
+  (`TYPESAFE_API_KEY`, provider API keys, tool tokens, `PATH`) work directly in
+  the daemon without copying them into `secrets.enc`.
+- **Unified decision-model readiness across all callers:** `composeJudgment`
+  now registers a process-level stored-key probe consulted by `decisionModelSet`
+  (and forwarded through `decisionModelReady`, `permissionDecisionModelReady`,
+  `cliDecisionModelFacts`, `decisionModelChoices`, and judgment fallbacks), so
+  the permission gate, `status`/`doctor`, and Settings UI stay consistent.
+- **Live Work step progress at the daemon source:** Both `work.list` (`runOf`)
+  and `summarizeContract` now derive live step progress in `statusLine` while a
+  contract is running without an explicit pause/terminal line, bringing live
+  step visibility to WebUI, Work board, CLI, `goodvibes-agent`, and TUI alike.
+- **Normalized remaining terminal redraw timers:** Updated spinner intervals in
+  `orchestrator.ts`, `hosted-turn-activity.ts`, and `first-run-flow.ts` to
+  250 ms (4 Hz) to match `ActivityAnimation`.
+
 ## [3.6.3] - 2026-11-28
 
 The full write-up is in

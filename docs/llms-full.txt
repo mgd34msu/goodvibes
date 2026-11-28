@@ -1,6 +1,6 @@
 # GoodVibes: overview, terms, architecture and where everything is stored
 
-This file describes GoodVibes release 3.6.3 completely. It is written for a language model that operates GoodVibes for a person. Everything a person or an automated client can reach is described here: installing, every program and command, every setting, every slash command, every model tool, every environment variable, every file GoodVibes writes, the operator API and every error. Nothing outside this file is needed.
+This file describes GoodVibes release 3.6.4 completely. It is written for a language model that operates GoodVibes for a person. Everything a person or an automated client can reach is described here: installing, every program and command, every setting, every slash command, every model tool, every environment variable, every file GoodVibes writes, the operator API and every error. Nothing outside this file is needed.
 
 How to read this file:
 
@@ -481,7 +481,7 @@ Terms used here:
 - The install directory is the directory that holds the programs. It is `~/.local/bin` unless an option changes it.
 - A release is a tagged GoodVibes version such as `v3.6.0`, published at `https://github.com/mgd34msu/goodvibes/releases`.
 
-This part describes release 3.6.3.
+This part describes release 3.6.4.
 
 ## Choosing an installation method
 
@@ -2586,7 +2586,7 @@ How each option behaves:
 | `--non-interactive` | Disables every interactive prompt and implies `--yes`. |
 | `--strict` | `doctor` only: also fail on advisory findings. Any other command ignores it. |
 | `-h, --help` | Prints help: first `Most used:` (start the app, `run "<prompt>"`, `pair`, `status`, `goodvibes-daemon update --check`; the Agent adds `setup`), then every command, the options and examples. `goodvibes help <command>` prints one command's help. |
-| `-v, --version` | Prints `goodvibes 3.6.3`. |
+| `-v, --version` | Prints `goodvibes 3.6.4`. |
 
 Only one of `--continue`, `--resume` and `--fork` may be given on one launch.
 
@@ -3143,7 +3143,7 @@ goodvibes completion fish > ~/.config/fish/completions/goodvibes.fish
 ### `goodvibes help` and `goodvibes version`
 
 `goodvibes help` prints the overview; `goodvibes help <command>` prints one command's usage and examples.
-`goodvibes version` prints `goodvibes 3.6.3`.
+`goodvibes version` prints `goodvibes 3.6.4`.
 `goodvibes help version` has no detailed help and prints the overview.
 
 ## The interface
@@ -9581,7 +9581,7 @@ goodvibes-daemon completion fish > ~/.config/fish/completions/goodvibes-daemon.f
 
 `check-install-reader <installed-executable>` is run by the release installer: it checks whether this release can read an installation's saved data without loading settings or changing files. `--describe` lists the readers compiled in. A person does not need to run it.
 
-`help [command] [--json]` prints help. `version` (and `-v`, `--version`) prints `goodvibes-daemon 3.6.3`.
+`help [command] [--json]` prints help. `version` (and `-v`, `--version`) prints `goodvibes-daemon 3.6.4`.
 
 ## Network exposure
 
@@ -12070,7 +12070,7 @@ The client sends the token as `Authorization: Bearer <token>`, which is what the
 
 ## SDK entry points
 
-The package `@goodvibes/engine` (version 3.6.3) contains typed clients for this API. It does not call model providers itself; the daemon does.
+The package `@goodvibes/engine` (version 3.6.4) contains typed clients for this API. It does not call model providers itself; the daemon does.
 
 How it is published: two packages of the repository are publishable, `@goodvibes/engine` (`packages/engine`) and `@goodvibes/judgment` (`packages/judgment`); the products (`goodvibes`, `goodvibes-agent`, the daemon, the web UI) are private and never published. The release workflow publishes the two packages to `https://registry.npmjs.org` with provenance only when a release runs from a version tag and the repository variable `PUBLISH_NPM` is `true`; otherwise a release produces the native GitHub release and its installer assets and publishes nothing to npm. The repository does not record that variable's value, so whether a given version is on npm is answered by the registry, not by the source:
 
@@ -12081,8 +12081,8 @@ npm view @goodvibes/engine versions --json
 When the version you need is there, install it like any package:
 
 ```sh
-bun add @goodvibes/engine@3.6.3
-npm install @goodvibes/engine@3.6.3
+bun add @goodvibes/engine@3.6.4
+npm install @goodvibes/engine@3.6.4
 ```
 
 When it is not, use it from a source checkout of the same version, inside that checkout's workspace:
@@ -12090,7 +12090,7 @@ When it is not, use it from a source checkout of the same version, inside that c
 ```sh
 git clone https://github.com/mgd34msu/goodvibes.git
 cd goodvibes
-git checkout v3.6.3
+git checkout v3.6.4
 bun install
 bun run build                 # produces the dist/ directories the package's exports name
 mkdir -p products/my-client
@@ -12164,7 +12164,7 @@ Every operator method (id, REST route or invoke-only, scopes) is listed in "Oper
 
 # Reference
 
-This appendix holds every complete list GoodVibes keeps in its code. Each list below is built from the program itself each time this file is generated, so it matches release 3.6.3 exactly. The other parts of this file explain how to use these things; this part is where to look up an exact name, flag, default or value.
+This appendix holds every complete list GoodVibes keeps in its code. Each list below is built from the program itself each time this file is generated, so it matches release 3.6.4 exactly. The other parts of this file explain how to use these things; this part is where to look up an exact name, flag, default or value.
 
 ## Settings
 
@@ -20662,6 +20662,7 @@ Every environment variable the programs and the installer read. "Read by" names 
 | `GOODVIBES_MAX_QUEUE_OPS_PER_DAY` | Cloudflare Worker | Queue operations allowed per day in free-tier mode. |
 | `GOODVIBES_MAX_QUEUE_PAYLOAD_BYTES` | Cloudflare Worker | The largest job payload, in bytes, the Worker puts on its queue. |
 | `GOODVIBES_NATIVE_STARTUP_OBSERVATION` | goodvibes-daemon | `1` makes the daemon print each start-up phase, for the installer's start check. Set by GoodVibes itself; do not set it by hand. |
+| `GOODVIBES_NO_SHELL_ENV` | goodvibes-daemon | `1` disables startup hydration of missing environment variables from the user's login shell when `goodvibes-daemon` runs under `systemd` or `launchd`. |
 | `GOODVIBES_OPERATOR_TOKEN` | Cloudflare Worker | The operator token the Worker sends to the daemon, when `GOODVIBES_OPERATOR_TOKEN_STORE` holds none. |
 | `GOODVIBES_OPERATOR_TOKEN_STORE` | Cloudflare Worker | A Cloudflare Secrets Store binding holding the operator token, read first. GoodVibes binds it when it deploys the Worker with a secrets store. |
 | `GOODVIBES_PLAYWRIGHT_CORE` | every program | A directory holding the browser driver (`playwright-core`), searched before the copies shipped beside the program. |
@@ -20718,6 +20719,8 @@ Every environment variable the programs and the installer read. "Read by" names 
 | `IMESSAGE_BRIDGE_TOKEN` | every program | A credential, read before a stored secret of the same name. The daemon authenticates to the iMessage bridge with it. |
 | `IMESSAGE_BRIDGE_URL` | goodvibes-daemon | The iMessage bridge address for sending. |
 | `INCEPTION_API_KEY` | every program | A sign-in value (key, token, profile or project) the `inceptionlabs` provider reads; read before a secret of the same name in the secret store. |
+| `INVOCATION_ID` | goodvibes-daemon | Set by `systemd` when starting a service unit; tells `goodvibes-daemon` it was launched under a service manager so it can hydrate missing environment variables from the user's login shell in memory. Set by GoodVibes itself; do not set it by hand. |
+| `JOURNAL_STREAM` | goodvibes-daemon | Set by `systemd` when wiring service output to the journal; used beside `INVOCATION_ID` to detect a systemd-managed daemon launch for startup login-shell environment hydration. Set by GoodVibes itself; do not set it by hand. |
 | `LANG` | terminal apps | The locale, read after `LC_ALL` and `LC_CTYPE`: a non-UTF-8 locale (`C`, `POSIX`) makes the work tree draw with plain ASCII. |
 | `LC_ALL` | terminal apps | The locale, read first; see `LANG`. |
 | `LC_CTYPE` | terminal apps | The locale, read after `LC_ALL`; see `LANG`. |
@@ -20786,7 +20789,7 @@ Every environment variable the programs and the installer read. "Read by" names 
 | `SAMBANOVA_API_KEY` | every program | A sign-in value (key, token, profile or project) the `sambanova` provider reads; read before a secret of the same name in the secret store. |
 | `SEARXNG_BASE_URL` | every program | The SearXNG instance web search uses; required for the SearXNG backend unless a `searxng` service entry gives `baseUrl`. |
 | `SGLANG_API_KEY` | every program | A sign-in value (key, token, profile or project) the `sglang` provider reads; read before a secret of the same name in the secret store. |
-| `SHELL` | installer | The login shell, which decides the shell start-up file the release installer adds its `PATH` line to (and removes it from on uninstall). |
+| `SHELL` | goodvibes-daemon, installer | The login shell. The release installer uses it to pick the start-up file that receives its `PATH` line, and `goodvibes-daemon` uses it as a fallback after `/etc/passwd` when hydrating missing shell variables under a service manager. |
 | `SIGNAL_BRIDGE_TOKEN` | every program | A credential, read before a stored secret of the same name. The daemon authenticates to the Signal bridge with it. |
 | `SIGNAL_BRIDGE_URL` | goodvibes-daemon | The Signal bridge address for sending. |
 | `SLACK_APP_TOKEN` | every program | A credential, read before a stored secret of the same name. The daemon opens the Slack socket-mode connection with it. |
@@ -20839,6 +20842,7 @@ Every environment variable the programs and the installer read. "Read by" names 
 | `XIAOMI_API_KEY` | every program | A sign-in value (key, token, profile or project) the `xiaomi` provider reads; read before a secret of the same name in the secret store. |
 | `XI_API_BASE` | every program | Read like `ELEVENLABS_BASE_URL` when that is not set. |
 | `XI_API_KEY` | every program | A sign-in value (key, token, profile or project) the `elevenlabs` provider reads; read before a secret of the same name in the secret store. |
+| `XPC_SERVICE_NAME` | goodvibes-daemon | Set by macOS `launchd` for a LaunchAgent; when present and not `0`, tells `goodvibes-daemon` to hydrate missing environment variables from the user's login shell in memory. Set by GoodVibes itself; do not set it by hand. |
 | `ZAI_API_KEY` | every program | A sign-in value (key, token, profile or project) the `zai` provider reads; read before a secret of the same name in the secret store. |
 | `ZENMUX_API_KEY` | every program | A sign-in value (key, token, profile or project) the `zenmux`, `zenmux-anthropic` providers read; read before a secret of the same name in the secret store. |
 | `Z_AI_API_KEY` | every program | A sign-in value (key, token, profile or project) the `zai` provider reads; read before a secret of the same name in the secret store. |

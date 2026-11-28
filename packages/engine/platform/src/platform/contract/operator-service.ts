@@ -27,6 +27,7 @@ import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { OwnerReplyRefusedError, type OwnerReplyOutcome } from './escalation.js';
 import type { ContractExternalWorkAdapter } from './external.js';
+import { liveContractStatusLine } from './live-progress.js';
 import type { ContractRunner, UnitRetryOutcome } from './runner.js';
 import type { ContractHold } from './resume.js';
 import type { BudgetCeiling } from '../orchestration/types.js';
@@ -280,6 +281,7 @@ export function summarizeContract(contract: ContractView, hold: ContractHold | n
     marks.push(unit.status, unit.activeAgentId ?? '', unit.agentIds.length, unit.checks.length, unit.nudges.length, unit.fixRounds, unit.touchedPaths.length);
   }
   for (const group of contract.groups) marks.push(group.status, group.checks.length, group.fixRounds);
+  const statusLine = contract.statusLine ?? liveContractStatusLine(contract);
   const fields = {
     id: contract.id,
     sessionId: contract.sessionId,
@@ -288,7 +290,7 @@ export function summarizeContract(contract: ContractView, hold: ContractHold | n
     ask: contract.ask,
     goal: contract.goal,
     status: contract.status,
-    ...(contract.statusLine === undefined ? {} : { statusLine: contract.statusLine }),
+    ...(statusLine === undefined ? {} : { statusLine }),
     ...(contract.failureKind === undefined ? {} : { failureKind: contract.failureKind }),
     ...(contract.error === undefined ? {} : { error: contract.error }),
     groupCount: contract.groups.length,

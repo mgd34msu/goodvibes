@@ -139,8 +139,12 @@ export type { DecisionModelSettings } from '../config/decision-model-set.js';
  * A key in the secret store is trusted to be there; a failed request then
  * takes the judgment's fallback and is reported.
  */
-export function decisionModelReady(settings: DecisionModelSettings, env: Readonly<Record<string, string | undefined>> = process.env): boolean {
-  return settings.policy !== 'No Decision Model' && decisionModelSet(settings, env);
+export function decisionModelReady(
+  settings: DecisionModelSettings,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  options: { readonly hasStoredKey?: boolean | undefined } = {},
+): boolean {
+  return settings.policy !== 'No Decision Model' && decisionModelSet(settings, env, options);
 }
 
 /**

@@ -81,8 +81,12 @@ function decisionProfileEntry(profile: DecisionModelProfile): { readonly id: str
  * offers (openSettingsChoice 'judgment-model'), and choosing one goes through
  * that same choice (its `pick` start), so the judgment.* settings have one writer.
  */
-export function decisionModelChoices(config: Pick<ConfigManager, 'get'>, env: Readonly<Record<string, string | undefined>> = process.env): readonly ModelPickerChoice[] {
-  const set = decisionModelSet(decisionModelSettings(key => config.get(key)), env);
+export function decisionModelChoices(
+  config: Pick<ConfigManager, 'get'>,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  options: { readonly hasStoredKey?: boolean | undefined } = {},
+): readonly ModelPickerChoice[] {
+  const set = decisionModelSet(decisionModelSettings(key => config.get(key)), env, options);
   const model = String(config.get('judgment.model') ?? '');
   const restore = setAsideRestore(config);
   return [

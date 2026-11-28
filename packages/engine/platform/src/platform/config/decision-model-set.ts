@@ -22,6 +22,33 @@ export const DECISION_MODEL_SET_KEYS = ['judgment.policy', 'judgment.endpoint', 
 
 const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
+type StoredDecisionKeyProbe = (keyName: string) => boolean;
+const storedKeyProbes: StoredDecisionKeyProbe[] = [];
+
+/**
+ * Registers a process-level check for whether a decision-model key exists in
+ * the active runtime's secret store (used only when `decisionModelSet` is
+ * called against `process.env` without an explicit `hasStoredKey` override).
+ * Returns a disposer that removes this probe.
+ */
+export function registerStoredDecisionKeyProbe(probe: StoredDecisionKeyProbe): () => void {
+  storedKeyProbes.push(probe);
+  let removed = false;
+  return () => {
+    if (removed) return;
+    removed = true;
+    const idx = storedKeyProbes.lastIndexOf(probe);
+    if (idx >= 0) storedKeyProbes.splice(idx, 1);
+  };
+}
+
+function hasRegisteredStoredKey(keyName: string): boolean {
+  for (let i = storedKeyProbes.length - 1; i >= 0; i -= 1) {
+    try { if (storedKeyProbes[i]!(keyName)) return true; } catch { /* ignore probe failure */ }
+  }
+  return false;
+}
+
 /**
  * Set when any of these is: an endpoint (setting or TYPESAFE_BASE_URL), a
  * fallback target, an explicit credential choice (a secret-store entry, or no
@@ -40,8 +67,10 @@ export function decisionModelSet(
   if (text(settings.endpoint) || text(env['TYPESAFE_BASE_URL'])) return true;
   if (Array.isArray(settings.fallbacks) && settings.fallbacks.length > 0) return true;
   if (settings.keySource === 'secret' || settings.keySource === 'none') return true;
-  if (text(env[text(settings.keyName) || 'TYPESAFE_API_KEY'])) return true;
+  const keyName = text(settings.keyName) || 'TYPESAFE_API_KEY';
+  if (text(env[keyName])) return true;
   if (options.hasStoredKey === true) return true;
+  if (options.hasStoredKey === undefined && env === process.env && hasRegisteredStoredKey(keyName)) return true;
   return Boolean(text(settings.model) || text(env['TYPESAFE_DEFAULT_MODEL']));
 }
 

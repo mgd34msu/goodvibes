@@ -93,7 +93,11 @@ export function formatDelegatedWorkProgress(title: string, state: string, runVie
   const held = text(runView['held']);
   const statusLine = text(runView['statusLine']);
   const summary = stepProgressSummary(state, runView);
-  return [`"${shortTitle}": ${summary}`, statusLine, held ? `Held back: ${held}` : ''].filter(Boolean).join('. ');
+  // Avoid duplicating live step progress when the daemon already populated `run.statusLine` with it.
+  const isRunning = state === 'running' || state === 'starting';
+  const headline = isRunning && statusLine ? statusLine : summary;
+  const extraStatus = isRunning && statusLine ? '' : statusLine;
+  return [`"${shortTitle}": ${headline}`, extraStatus, held ? `Held back: ${held}` : ''].filter(Boolean).join('. ');
 }
 
 /** Where a piece of work waits on the owner in Work: a headless run stops waiting there and says so. */

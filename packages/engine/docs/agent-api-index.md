@@ -1,6 +1,6 @@
 # Agent API index
 
-Generated from the operator contract (product 3.6.3) by `bun run agent-spec:generate`. Spec: [agent-api.openapi.json](./agent-api.openapi.json). Everything not listed here is in the full document, `contracts/artifacts/operator-openapi.json`.
+Generated from the operator contract (product 3.6.4) by `bun run agent-spec:generate`. Spec: [agent-api.openapi.json](./agent-api.openapi.json). Everything not listed here is in the full document, `contracts/artifacts/operator-openapi.json`.
 
 Auth: `Authorization: Bearer <token>` or the login session cookie. Errors are `{ error, state?, next?, hint?, code?, category?, requestId?, retryAfterMs? }`; a 403 for a missing scope also lists `requiredScopes`, `grantedScopes` and `missingScopes`.
 

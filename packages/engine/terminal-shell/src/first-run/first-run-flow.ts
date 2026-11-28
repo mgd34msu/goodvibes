@@ -624,7 +624,7 @@ export class FirstRunModal implements SurfaceModal {
 
   private startSpinner(): void {
     if (this.spinner) return;
-    this.spinner = setInterval(() => { this.frameNo += 1; this.deps.renderRequest(); }, 120);
+    this.spinner = setInterval(() => { this.frameNo += 1; this.deps.renderRequest(); }, 250);
     (this.spinner as { unref?: () => void }).unref?.();
   }
 

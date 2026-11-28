@@ -79,11 +79,11 @@ export interface HostedTurnActivity {
 }
 
 /**
- * The orchestrator's own animation cadence. Matched deliberately: a different
- * interval would make a hosted turn's spinner visibly slower or faster than a
- * local one, which is a presentation change nobody asked for.
+ * The orchestrator's own animation cadence (4 Hz). Matched deliberately so a
+ * hosted turn's spinner stays aligned with a local turn without high-frequency
+ * redraw CPU overhead.
  */
-export const HOSTED_SPINNER_INTERVAL_MS = 80;
+export const HOSTED_SPINNER_INTERVAL_MS = 250;
 
 export function createHostedTurnActivity(input: {
   readonly turnState: ThinkingUiState;

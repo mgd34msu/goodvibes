@@ -1024,10 +1024,11 @@ export class Orchestrator {
     // animInterval is always (re)started on every think call to reset the frame
     // counter and ensure a fresh animation cycle, even if already running.
     if (this.animInterval) clearInterval(this.animInterval);
+    // 250ms (4 Hz) keeps spinner animation smooth without burning CPU on full-screen redraws.
     this.animInterval = setInterval(() => {
       this.thinkingFrame++;
       this.requestRender();
-    }, 80);
+    }, 250);
     // unref() prevents this timer from holding the event loop open after the
     // process has otherwise completed all work. The cast is required
     // because the TypeScript setInterval return type does not expose unref();

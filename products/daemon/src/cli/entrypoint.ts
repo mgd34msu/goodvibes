@@ -8,6 +8,7 @@ import { initializeOriginalDarwinDaemonInstallation } from '../config/original-d
 import { initializeDaemonNativeSqlite } from './native-sqlite-runtime.js';
 import { exemptLoopbackFromProxy } from '@goodvibes/engine/transport-http/paths';
 import { keepProcessPrivate } from '@goodvibes/engine/platform/platform/utils/process-privacy';
+import { hydrateServiceShellEnvironment } from './shell-env.js';
 
 // Requests to this machine never go through a proxy, from the first one on.
 exemptLoopbackFromProxy();
@@ -15,6 +16,8 @@ exemptLoopbackFromProxy();
 keepProcessPrivate();
 
 const args = process.argv.slice(2);
+// When started by systemd/launchd, fill in missing env vars from the user's login shell in memory only.
+hydrateServiceShellEnvironment(args);
 if (args[0] === '--internal-launchd-handover') {
   // This already-loaded worker must survive replacement of its native cohort.
   // Import only IPC/launchctl code, before SQLite or installation admission.

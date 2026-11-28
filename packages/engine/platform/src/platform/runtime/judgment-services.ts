@@ -25,7 +25,7 @@ import type { SecretsManager } from '../config/secrets.js';
 import type { ConfigManager } from '../config/manager.js';
 import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { captureJudgmentFallbackSettings } from '../config/judgment-fallback-settings.js';
-import { decisionModelSet, decisionModelSettings } from '../config/decision-model-set.js';
+import { decisionModelSet, decisionModelSettings, registerStoredDecisionKeyProbe } from '../config/decision-model-set.js';
 import { requestedDecisionEndpoint, requestedDecisionModel } from '../config/decision-model-request.js';
 import { describeDecisionLogCarriedForward, openStateDecisionLogWithNotice, scheduleDecisionLogRetention } from '../state/decision-log.js';
 import { noteCarriedForwardChange } from '../state/carried-forward.js';
@@ -135,7 +135,7 @@ export async function judgmentConfigFromSettings(source: JudgmentSettingsSource,
   const fallbacks: NonNullable<JudgmentConfig['fallbacks']>[number][] = [];
   for (const [index, target] of targets.entries()) {
     let key: string | null | undefined;
-    try { key = target.keySource === 'none' ? undefined : target.keySource === 'env' ? environmentKeys[index] : await storedKey(source.secrets, target.keyName, keyTimeoutMs, signal); }
+    try { key = await settingsKey(source.secrets, target.keySource, target.keyName, environmentKeys[index], keyTimeoutMs, signal); }
     catch (error) {
       signal?.throwIfAborted();
       // A fallback whose key cannot be read is left out of this reading rather than sent with no key.
@@ -434,16 +434,17 @@ function browserBoundaryOptions(source: JudgmentSettingsSource): WebuiAnswerBoun
  * readings, and retiring one hands the process to the newest still running.
  */
 export function composeJudgment(input: JudgmentServicesInput): JudgmentServices {
-  const hasStoredDecisionKey = (): boolean => {
-    const keyName = text(input.config.get('judgment.keyName')) || JUDGMENT_KEY_NAME;
+  const hasStoredKeyByName = (keyName: string): boolean => {
     const resolver = input.secrets as { resolveLocalSecretSync?: (name: string) => { readonly state: string } };
     try { return resolver.resolveLocalSecretSync?.(keyName).state === 'resolved'; } catch { return false; }
   };
+  const hasStoredDecisionKey = (): boolean => hasStoredKeyByName(text(input.config.get('judgment.keyName')) || JUDGMENT_KEY_NAME);
+  const unregisterStoredKeyProbe = registerStoredDecisionKeyProbe(hasStoredKeyByName);
   const restorePolicy = configureDecisionModelPolicy(
     () => input.config.get('judgment.policy'),
     () => decisionModelSet(decisionModelSettings(key => input.config.get(key)), input.env, { hasStoredKey: hasStoredDecisionKey() }),
   );
-  input.disposal.add('decision-model policy', () => { restorePolicy(); resetDecisionModelEpisode(); });
+  input.disposal.add('decision-model policy', () => { unregisterStoredKeyProbe(); restorePolicy(); resetDecisionModelEpisode(); });
   const { log: decisionLog, notice: decisionLogNotice } = openStateDecisionLogWithNotice(input.stateRoot);
   const transport = createSettingsJudgmentPort(input);
   const carriedForward = Promise.withResolvers<string | undefined>();

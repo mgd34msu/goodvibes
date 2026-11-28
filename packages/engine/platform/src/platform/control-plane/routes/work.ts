@@ -24,6 +24,7 @@ import type { NativeWorkExecutionHost, NativeWorkExecutionObservation } from '..
 import { WorkPlanRefusal, type WorkPlans, type WorkPlanView } from '../../workflow/work-ledger/work-plans.js';
 import { nativeBoundRevisions } from '../../workflow/work-ledger/service.js';
 import { isTerminalContractStatus, type ContractView } from '../../contract/types.js';
+import { liveContractStatusLine } from '../../contract/live-progress.js';
 import { canGoOnWithout, CONFLICT_ANSWERS, isConflictPause, type ConflictAnswer } from '../../contract/escalation.js';
 import { branchPresent, discardConflictBranch, discardKeptBranch, KeptBranchRefusal, mergeKeptBranch, readKeptBranch, type KeptBranch } from '../../contract/completion.js';
 import { WORK_LEDGER_READ_SCOPE } from '../method-catalog-work-ledger.js';
@@ -185,10 +186,11 @@ function ownBranchLine(contract: ContractView): string {
 }
 
 function runOf(contract: ContractView): WorkRunView {
+  const statusLine = contract.statusLine ? settledLine(contract) : liveContractStatusLine(contract);
   return {
     contractId: contract.id,
     status: contract.status,
-    ...(contract.statusLine ? { statusLine: settledLine(contract) } : {}),
+    ...(statusLine ? { statusLine } : {}),
     // What last held a step's change back, while the work is live or after it failed: in words, with what to do.
     ...(contract.heldChange && contract.status !== 'passed' && contract.status !== 'cancelled' ? { held: contract.heldChange.said } : {}),
     ...(contract.status === 'passed' && contract.answer ? { answer: contract.answer } : {}),

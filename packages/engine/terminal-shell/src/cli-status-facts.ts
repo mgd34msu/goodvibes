@@ -18,11 +18,15 @@ import type { DiscoveredServer } from '@goodvibes/engine/platform/platform/disco
  * without a runtime, so a failing model is reported by the running app, not
  * here): the policy as shown to a person, and the standing indication line.
  */
-export function cliDecisionModelFacts(config: Pick<ConfigManager, 'get'>, env: Readonly<Record<string, string | undefined>> = process.env) {
+export function cliDecisionModelFacts(
+  config: Pick<ConfigManager, 'get'>,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  options: { readonly hasStoredKey?: boolean | undefined } = {},
+) {
   let policy: DecisionModelPolicy;
   try { policy = parseDecisionModelPolicy(config.get('judgment.policy')); }
   catch { policy = DEFAULT_DECISION_MODEL_POLICY; }
-  const set = decisionModelSet(decisionModelSettings(key => config.get(key)), env);
+  const set = decisionModelSet(decisionModelSettings(key => config.get(key)), env, options);
   const reason = policy === 'No Decision Model' ? 'selected' as const : set ? null : 'not-set' as const;
   const use = decisionModelUse({ policy, operation: reason === null ? 'decision' : 'no-decision-model', reason, revision: 0 });
   return { policy, policyLabel: decisionModelPolicyLabel(policy), set, inUse: use.inUse, line: use.line };

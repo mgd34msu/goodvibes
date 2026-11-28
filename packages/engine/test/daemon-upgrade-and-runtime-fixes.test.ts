@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { restartDaemonAfterSuiteUpdate } from '../terminal-shell/src/release-update-preflight.js';
 import { createDaemonWorkDelegation, formatDelegatedWorkProgress } from '../terminal-shell/src/agent-turn/daemon-work-delegation.js';
-import { decisionModelSet } from '../platform/src/platform/config/decision-model-set.js';
+import { decisionModelSet, registerStoredDecisionKeyProbe } from '../platform/src/platform/config/decision-model-set.js';
+import { decisionModelReady } from '../platform/src/platform/gate/presets.js';
+import { formatLiveStepProgress, liveContractStatusLine } from '../platform/src/platform/contract/live-progress.js';
 import { useConnectedHostRefusal } from '../terminal-shell/src/agent-turn/connected-host-client.js';
 import { buildRecorderCommand } from '../platform/src/platform/voice/capture/recorder-command.js';
 import { fetchOpenAISubscriptionModelIds } from '../platform/src/platform/providers/openai-codex.js';
@@ -178,5 +180,41 @@ describe('daemon upgrade, version mismatch, openai subscription discovery, and v
     expect(decisionModelSet({ keySource: 'env' }, {})).toBe(false);
     expect(decisionModelSet({ keySource: 'env' }, {}, { hasStoredKey: true })).toBe(true);
     expect(decisionModelSet({ keySource: 'env', noDecisionModel: true }, {}, { hasStoredKey: true })).toBe(false);
+    expect(decisionModelReady({ keySource: 'env', policy: 'Hybrid' }, {}, { hasStoredKey: true })).toBe(true);
+    expect(decisionModelReady({ keySource: 'env', policy: 'No Decision Model' }, {}, { hasStoredKey: true })).toBe(false);
+
+    // Process-level stored-key probe applies only against process.env (never leaks into custom env maps).
+    const unregister = registerStoredDecisionKeyProbe((name) => name === 'CUSTOM_DECISION_KEY');
+    try {
+      expect(decisionModelSet({ keySource: 'env', keyName: 'CUSTOM_DECISION_KEY' }, {})).toBe(false);
+      expect(decisionModelSet({ keySource: 'env', keyName: 'CUSTOM_DECISION_KEY' }, process.env)).toBe(true);
+      expect(decisionModelSet({ keySource: 'env', keyName: 'CUSTOM_DECISION_KEY' }, process.env, { hasStoredKey: false })).toBe(false);
+    } finally {
+      unregister();
+    }
+  });
+
+  test('liveContractStatusLine derives live step progress for running contracts and avoids duplicating it', () => {
+    expect(formatLiveStepProgress([])).toBe('Planning steps on the daemon');
+    const live = liveContractStatusLine({
+      status: 'running',
+      statusLine: undefined,
+      units: [
+        { id: 'u1', title: 'Review backend', brief: '', status: 'passed' } as never,
+        { id: 'u2', title: 'Review frontend', brief: '', status: 'running' } as never,
+      ],
+    });
+    expect(live).toBe('1/2 steps done · running: Review frontend');
+    // Terminal or already-populated statusLine contracts are left untouched.
+    expect(liveContractStatusLine({ status: 'passed', statusLine: undefined, units: [] })).toBeUndefined();
+    expect(liveContractStatusLine({ status: 'running', statusLine: 'Waiting on approval', units: [] })).toBeUndefined();
+    // Delegation formatter does not duplicate daemon-provided live statusLine while running.
+    expect(formatDelegatedWorkProgress('review repo', 'running', {
+      statusLine: live,
+      steps: [
+        { id: 'u1', title: 'Review backend', status: 'passed' },
+        { id: 'u2', title: 'Review frontend', status: 'running' },
+      ],
+    })).toBe('"review repo": 1/2 steps done · running: Review frontend');
   });
 });

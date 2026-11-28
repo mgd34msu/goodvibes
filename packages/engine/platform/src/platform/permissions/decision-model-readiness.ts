@@ -42,6 +42,8 @@ export interface DecisionModelReadinessOptions {
    * mode in force for the next call, never for a call already being decided.
    */
   readonly assumeAnswering?: boolean | undefined;
+  /** Override whether a key for the configured decision model exists in the secret store. */
+  readonly hasStoredKey?: boolean | undefined;
 }
 
 /** Why the gate has no decision model to hand `jev-decides` calls to; undefined when it has one. */
@@ -57,7 +59,7 @@ function readinessReason(
 ): DecisionModelUnreadyReason | undefined {
   const env = options.env ?? process.env;
   const settings = decisionModelSettings(key => configManager.get(key));
-  if (!decisionModelReady(settings, env)) return settings.policy === 'No Decision Model' ? { kind: 'selected' } : { kind: 'not-set' };
+  if (!decisionModelReady(settings, env, { hasStoredKey: options.hasStoredKey })) return settings.policy === 'No Decision Model' ? { kind: 'selected' } : { kind: 'not-set' };
   // A set model counts as working only while it answers: from its first
   // failure until it answers again (runtime/decision-policy.ts, one memory read).
   const failure = options.assumeAnswering === true ? undefined : decisionModelFailure();

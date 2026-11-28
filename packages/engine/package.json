@@ -1,6 +1,6 @@
 {
   "name": "@goodvibes/engine",
-  "version": "3.6.6",
+  "version": "3.6.7",
   "description": "Shared platform services, clients, transports, and terminal components for GoodVibes.",
   "keywords": [
     "goodvibes",

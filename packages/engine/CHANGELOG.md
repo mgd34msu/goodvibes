@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.6.7] - 2026-11-28
+
+The full write-up is in
+[docs/releases/3.6.7.md](https://github.com/mgd34msu/goodvibes/blob/v3.6.7/docs/releases/3.6.7.md).
+
+### Fixed
+
+- **Prevent false decision-model rejections on valid native contract operations:**
+  Updated `INSTRUCTIONS` in `platform/contract/native-decisions.ts` to state
+  clearly that owner authority, workspace scope, immutable root criteria,
+  budgets, and structural/unit checks (when `evidence.problems` is empty or
+  absent) are host-verified, eliminating false high-stakes escalations into
+  plan/fix-plan/correction rejections while keeping harmful/off-task rejection
+  strict.
+
 ## [3.6.6] - 2026-11-28
 
 The full write-up is in

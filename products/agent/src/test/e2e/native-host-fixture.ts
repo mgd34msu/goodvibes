@@ -1,6 +1,6 @@
 /** A real daemon + paired authority; only external Jev/model replies are synthetic. */
 import { dirname, join } from 'node:path';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { BenchmarkStore } from '@goodvibes/engine/platform/platform/providers';
 import { registerInboxSurface } from '@goodvibes/engine/platform/platform/intake';
 import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath } from '@goodvibes/engine/platform/platform/workspace';
@@ -35,6 +35,16 @@ export async function startE2ENativeHost(home: E2EHome, options: { readonly poli
         const decision = configManager.setMany([{ key: 'judgment.endpoint', value: daemonJudgments.baseURL }, { key: 'judgment.keySource', value: 'env' }, { key: 'judgment.keyName', value: 'TYPESAFE_API_KEY' }], localOwnerActor());
         if (!decision.ok) throw new Error(`E2E decision endpoint was not set: ${decision.refusal.reason}`);
         if (options.policy) configManager.set('judgment.policy', options.policy);
+        // The paired daemon owns the shared default model (provider.model) and custom providers;
+        // mirror the E2E home's scripted stub provider into the daemon fixture so the paired Agent
+        // receives e2e-stub:stub-model rather than the unconfigured stock openrouter default.
+        const stubSource = join(home.home, '.goodvibes', 'tui', 'providers', 'e2e-stub.json');
+        if (existsSync(stubSource)) {
+          const daemonProviders = join(home.root, 'native-host', 'home', '.goodvibes', 'tui', 'providers');
+          mkdirSync(daemonProviders, { recursive: true });
+          copyFileSync(stubSource, join(daemonProviders, 'e2e-stub.json'));
+          configManager.set('provider.model', 'e2e-stub:stub-model');
+        }
         seedProviderMetadataCacheFixture({ configManager, homeDirectory: join(home.root, 'native-host/home'),
           workingDirectory: join(home.root, 'native-host/workspace'), surfaceRoot: 'goodvibes' });
         seedProviderModelListCacheFixture(configManager, 'openai');
@@ -48,6 +58,10 @@ export async function startE2ENativeHost(home: E2EHome, options: { readonly poli
       const scopes = new WorkspaceRegistrationStore({ path: sharedWorkspaceRegisterPath(daemon.services.shellPaths),
         homeDir: daemon.homeDirectory, daemonStateDir: daemon.services.shellPaths.resolveUserPath() });
       await scopes.add(daemon.workingDirectory);
+      // The daemon fixture has its own separate homeDirectory from the Agent's E2E home, so the
+      // Agent's startup registration writes to home.home while the daemon reads native-host/home.
+      // Register home.workspace in the daemon fixture's store without touching home.home.
+      await scopes.add(home.workspace);
       // This is explicit fixture setup, never product startup or an implicit
       // grant. Exercise the existing authenticated migration route itself.
       const migration = await daemon.fetch('/api/control-plane/methods/pairing.tokens.migrate/invoke', {

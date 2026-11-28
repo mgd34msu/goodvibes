@@ -272,8 +272,10 @@ export async function makeHome(model: StubModel): Promise<E2EHome> {
   const home = join(root, 'home');
   const workspace = join(root, 'workspace');
   const agentDir = join(home, '.goodvibes', 'agent');
+  const daemonStateDir = join(home, '.goodvibes', 'tui');
   const daemonHome = join(home, '.goodvibes', 'daemon');
   mkdirSync(join(agentDir, 'providers'), { recursive: true });
+  mkdirSync(join(daemonStateDir, 'providers'), { recursive: true });
   mkdirSync(daemonHome, { recursive: true });
   mkdirSync(workspace, { recursive: true });
   writeFileSync(join(home, '.gitconfig'), '[user]\n\tname = E2E Owner\n\temail = e2e@example.test\n[init]\n\tdefaultBranch = main\n');
@@ -283,7 +285,7 @@ export async function makeHome(model: StubModel): Promise<E2EHome> {
   git('add', '-A');
   git('commit', '-q', '-m', 'init');
 
-  writeFileSync(join(agentDir, 'providers', 'e2e-stub.json'), JSON.stringify({
+  writeFileSync(join(daemonStateDir, 'providers', 'e2e-stub.json'), JSON.stringify({
     name: 'e2e-stub',
     displayName: 'E2E Stub',
     type: 'openai-compat',

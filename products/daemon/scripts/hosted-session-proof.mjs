@@ -166,6 +166,7 @@ export async function runHostedSessionProof({ binary, boundary, env, root }) {
       return controller;
     }
     await start();
+    await invoke('workspaces.registrations.add', { root: work });
     const wrong = await request('/api/control-plane/methods/sessions.hosted.create/invoke', { body: { workspaceRoot: work } }, 'wrong-owned-token');
     assert.equal(wrong.status, 401); assert.equal(modelRequests.length, 0);
     for (const [path, body] of [

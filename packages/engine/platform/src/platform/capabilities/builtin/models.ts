@@ -21,6 +21,7 @@ import { getSubscriptionProviderConfig, listAvailableSubscriptionProviders, list
 import type { ProviderApi } from '../../providers/provider-api.js';
 import type { ProviderOptimizer } from '../../providers/optimizer.js';
 import type { ProviderRegistry } from '../../providers/registry.js';
+import { resolveProviderDefaultModel } from '../../providers/provider-default-model.js';
 import type { LLMProvider } from '../../providers/interface.js';
 import { buildProviderAccountSnapshot, type ProviderAccountRecord, type ProviderAccountSnapshot } from '../../runtime/provider-accounts/registry.js';
 import { buildAuthInspectionSnapshot, inspectProviderAuth, type ProviderAuthInspection } from '../../runtime/auth/inspection.js';
@@ -380,7 +381,7 @@ export const PROVIDER_USE: CapabilityDefinition<ModelsCapabilityServices> = {
   actionId: 'use', label: 'Switch provider', word: 'use',
   inputs: [
     { id: 'provider', label: 'Provider', help: 'The providers you have', kind: 'choice', choices: { list: PROVIDERS_LIST }, required: true, typed: { position: 1 } },
-    { id: 'model', label: 'Model', help: 'One of its models', kind: 'choice', choices: { list: PROVIDER_MODELS_LIST, dependsOn: 'provider' }, required: { default: '', defaultMeans: 'its first model' }, typed: { flag: '--model' } },
+    { id: 'model', label: 'Model', help: 'One of its models', kind: 'choice', choices: { list: PROVIDER_MODELS_LIST, dependsOn: 'provider' }, required: { default: '', defaultMeans: 'its highest benchmark-ranked model' }, typed: { flag: '--model' } },
   ],
   sentence: 'Every conversation that has not chosen its own model uses {provider} from the next message, until you change it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { provider: 'openai' },
@@ -388,7 +389,12 @@ export const PROVIDER_USE: CapabilityDefinition<ModelsCapabilityServices> = {
     const models = services.models;
     const provider = values.provider!.trim();
     const listed = await models.providerApi.listModels({ providerId: provider, selectableOnly: true });
-    const chosen = values.model ? listed.find((model) => model.modelId === values.model || model.registryKey === values.model) : listed[0];
+    const preferredDefault = !values.model
+      ? resolveProviderDefaultModel(provider, { availableModels: listed.map((model) => model.modelId) })
+      : undefined;
+    const chosen = values.model
+      ? listed.find((model) => model.modelId === values.model || model.registryKey === values.model)
+      : (preferredDefault ? listed.find((model) => model.modelId === preferredDefault) : undefined) ?? listed[0];
     if (!chosen) {
       throw new CapabilityRefusal(values.model
         ? `${provider} has no model ${values.model} you can use; nothing was changed.`

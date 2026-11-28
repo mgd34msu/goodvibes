@@ -59,6 +59,38 @@ export function knownCatalogChatCapability(provider: string, modelId: string): b
 /** Catalog types of models that do not hold a conversation. */
 const NON_CONVERSATION_TYPES: ReadonlySet<string> = new Set(['embedding', 'reranking', 'image', 'video', 'speech', 'transcription', 'decision', 'realtime']);
 
+/** All installed catalog rows for one provider (matching catalog aliases in either direction). */
+export function catalogModelsForProvider(provider: string): readonly CatalogModel[] {
+  const records = byProvider.get(canonicalProviderId(provider));
+  return records ? [...records.values()] : [];
+}
+
+/**
+ * Programmatic benchmark rank score from the installed `models.dev` catalog for
+ * a model: prefers this provider's entry, then falls back to an exact or
+ * canonical catalog match across providers so live-discovered models that match
+ * a benchmarked `models.dev` model still rank by their catalog score.
+ */
+export function catalogModelBenchmarkScore(provider: string, modelId: string): number | undefined {
+  const direct = catalogModelsForReference(modelId, provider);
+  const directScore = bestCatalogBenchmarkScore(direct);
+  if (directScore !== undefined) return directScore;
+  const global = catalogModelsForReference(modelId);
+  const globalScore = bestCatalogBenchmarkScore(global);
+  if (globalScore !== undefined) return globalScore;
+  const identity = knownCatalogModelIdentity(modelId);
+  return identity ? bestCatalogBenchmarkScore(catalogModelsForReference(identity)) : undefined;
+}
+
+function bestCatalogBenchmarkScore(models: readonly CatalogModel[]): number | undefined {
+  let best: number | undefined;
+  for (const model of models) {
+    if (typeof model.benchmarkScore !== 'number' || !Number.isFinite(model.benchmarkScore)) continue;
+    if (best === undefined || model.benchmarkScore > best) best = model.benchmarkScore;
+  }
+  return best;
+}
+
 /** Exact endpoint facts. A canonical ID can join only this provider's offerings. */
 export function catalogModelsForReference(modelId: string, provider?: string): readonly CatalogModel[] {
   if (provider === undefined) return byReference.get(modelId) ?? [];

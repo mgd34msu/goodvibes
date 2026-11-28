@@ -419,7 +419,6 @@ export class AnthropicVertexProvider extends AnthropicMessagesProvider {
     super({
       name: 'anthropic-vertex',
       label: 'Anthropic Vertex',
-      defaultModel: 'claude-sonnet-4-6',
       // The project's listing, else the pinned catalog's rows: no list is written here.
       models: [],
       // Async because the client class itself is built after

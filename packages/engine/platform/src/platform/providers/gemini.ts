@@ -38,6 +38,7 @@ import type { GeminiPart } from './tool-formats.js';
 import type { CacheHitTracker } from './cache-strategy.js';
 import { summarizeError, toProviderError } from '../utils/error-display.js';
 import { SseLineBuffer } from './sse-line-buffer.js';
+import { resolveProviderDefaultModel } from './provider-default-model.js';
 import { createHash } from 'node:crypto';
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
@@ -635,6 +636,7 @@ export class GeminiProvider implements LLMProvider {
       configured: Boolean(this.apiKey),
       detail: this.apiKey ? 'Gemini API key available' : 'Gemini API key is not configured',
     }, authRoutes);
+    const defaultModel = resolveProviderDefaultModel(this.name, { availableModels: this.models });
     return {
       auth: {
         mode: 'api-key',
@@ -644,6 +646,7 @@ export class GeminiProvider implements LLMProvider {
         routes: authRoutes,
       },
       models: {
+        ...(defaultModel ? { defaultModel } : {}),
         models: this.models,
         embeddingModel: this.embeddingModel,
       },

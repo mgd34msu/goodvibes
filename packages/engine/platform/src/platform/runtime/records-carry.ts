@@ -13,11 +13,17 @@
  * Process locks and SQLite side files are never carried as files of their own. A waiting approval is carried as one
  * nothing waits for (the process that asked is gone), so it is never listed as waiting for the owner.
  */
-import { Database } from 'bun:sqlite';
+import { createRequire } from 'node:module';
+import type { Database } from 'bun:sqlite';
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { summarizeError } from '../utils/error-display.js';
 import { withProcessLockSync } from '../utils/process-lock.js';
+
+let databaseCtor: typeof Database | null = null;
+function bunDatabase(): typeof Database {
+  return (databaseCtor ??= (createRequire(import.meta.url)('bun:sqlite') as typeof import('bun:sqlite')).Database);
+}
 
 export type CarriedJson = null | boolean | number | string | CarriedJson[] | { [key: string]: CarriedJson };
 
@@ -144,7 +150,8 @@ function withRecordWriterLock<T>(to: string, write: () => T): T {
 
 /** Every row of `other` added to `target` where a table of that name exists in both; a row already there is kept. */
 export function mergeSqliteRows(target: string, other: string): void {
-  const db = new Database(target);
+  const DatabaseCtor = bunDatabase();
+  const db = new DatabaseCtor(target);
   try {
     db.run('PRAGMA busy_timeout = 5000');
     db.query('ATTACH DATABASE ? AS other').run(other);

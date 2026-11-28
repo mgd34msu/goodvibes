@@ -66,7 +66,7 @@ export async function parseModelCatalogRepository(files: ReadonlyMap<string, str
         logger.warn('Model catalog entry skipped: unresolved base_model', { path });
         continue;
       }
-      const base = Object.fromEntries(Object.entries(metadata.get(baseId)!).filter(([key]) => !['id', 'benchmarks', 'license', 'links', 'weights'].includes(key)));
+      const base = Object.fromEntries(Object.entries(metadata.get(baseId)!).filter(([key]) => !['id', 'license', 'links', 'weights'].includes(key)));
       const overrides = Object.fromEntries(Object.entries(authored).filter(([key]) => key !== 'base_model' && key !== 'base_model_omit'));
       model = structuredClone(merge(base, overrides));
       if (Array.isArray(authored.base_model_omit) && authored.base_model_omit.some(omitted => typeof omitted !== 'string')) {

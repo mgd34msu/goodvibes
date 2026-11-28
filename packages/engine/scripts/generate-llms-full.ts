@@ -1294,10 +1294,12 @@ async function providersSection(): Promise<string> {
     const aliases = provider.aliases ?? definition?.aliases ?? [];
     const signIns = [keys.length > 0 ? 'API key' : '', subscriptions.has(name) ? `subscription (${subscriptions.get(name)!.displayName})` : '', definition?.allowAnonymous ? 'no key needed' : ''].filter(Boolean);
     const base = definition?.baseURL ?? provider.baseURL ?? '';
-    const model = definition?.defaultModel ?? provider.defaultModel ?? '';
-    rows.push(`| ${code(name)} | ${cell(providerDisplayLabel(name))} | ${aliases.map(code).join(', ')} | ${keys.map(code).join(', ')} | ${signIns.join(', ')} | ${base ? code(base) : 'the provider\'s own'} | ${model ? code(model) : 'from its model list'} |`);
+    const model = provider.defaultModel ?? '';
+    rows.push(`| ${code(name)} | ${cell(providerDisplayLabel(name))} | ${aliases.map(code).join(', ')} | ${keys.map(code).join(', ')} | ${signIns.join(', ')} | ${base ? code(base) : 'the provider\'s own'} | ${model ? code(model) : 'highest benchmark-ranked in models.dev (or live list)'} |`);
   }
   const out = [
+    'Built-in providers do not hardcode default model IDs: each provider\'s default resolves programmatically when the `models.dev` catalog or live model list refreshes, selecting the highest benchmark-ranked text model it serves (falling back to tool-capable models by newest release date when unbenchmarked).',
+    '',
     '| Provider id | Name | Aliases | Credential variables | Sign-ins | Base URL | Default model |',
     '| --- | --- | --- | --- | --- | --- | --- |',
     ...rows,

@@ -1,5 +1,6 @@
 import { documentedMaxOutput } from './anthropic.js';
 import { safeEndpointOrigin } from './provider-setup.js';
+import { resolveProviderDefaultModel } from './provider-default-model.js';
 import { revalidateProviderAttempt } from './attempt-guard.js';
 import type {
   LLMProvider,
@@ -46,8 +47,12 @@ export interface AnthropicCompatOptions {
   baseURL: string;
   /** API key sent as the x-api-key header */
   apiKey: string;
-  /** Model ID to use when none is specified in ChatRequest */
-  defaultModel: string;
+  /**
+   * Optional explicit default model (custom provider files or test doubles).
+   * Built-in providers omit this so the default resolves programmatically from
+   * live discovery and the `models.dev` benchmark catalog.
+   */
+  defaultModel?: string | undefined;
   /**
    * Models declared for this provider by whoever set it up (a custom provider
    * file, a plugin). Builtins declare none: their list is the backend's
@@ -143,7 +148,7 @@ export class AnthropicCompatProvider implements LLMProvider {
 
   private baseURL: string;
   private apiKey: string;
-  private defaultModel: string;
+  private readonly configuredDefaultModel: string | undefined;
   private defaultHeaders: Record<string, string>;
   private readonly authEnvVars: readonly string[];
   private readonly serviceNames: readonly string[];
@@ -175,7 +180,7 @@ export class AnthropicCompatProvider implements LLMProvider {
       : { kind: 'live-discovery' };
     this.baseURL = opts.baseURL.replace(/\/$/, ''); // strip trailing slash
     this.apiKey = opts.apiKey;
-    this.defaultModel = opts.defaultModel;
+    this.configuredDefaultModel = opts.defaultModel?.trim() || undefined;
     this.defaultHeaders = opts.defaultHeaders ?? {};
     this.authEnvVars = opts.authEnvVars ?? [];
     this.serviceNames = opts.serviceNames ?? [];
@@ -188,6 +193,31 @@ export class AnthropicCompatProvider implements LLMProvider {
     this.anonymousDetail = opts.anonymousDetail;
     this.setupDescription = opts.setupDescription;
     this.retryConfig = opts.retryConfig;
+  }
+
+  /**
+   * Programmatic default model for this provider: uses an explicit
+   * `opts.defaultModel` when given (and still offered when live models exist),
+   * otherwise resolves dynamically to the highest benchmark-ranked text model
+   * from `models.dev` (restricted to live-discovered models when present).
+   */
+  get defaultModel(): string | undefined {
+    if (this.configuredDefaultModel) {
+      if (this._models.length === 0 || this._models.includes(this.configuredDefaultModel)) {
+        return this.configuredDefaultModel;
+      }
+      return resolveProviderDefaultModel(this.name, { availableModels: this._models }) ?? this.configuredDefaultModel;
+    }
+    return resolveProviderDefaultModel(this.name, { availableModels: this._models });
+  }
+
+  private resolveChatModel(requested: string | undefined): string {
+    const resolved = requested?.trim() || this.defaultModel;
+    if (resolved) return resolved;
+    throw new ProviderError(
+      `Provider "${this.name}" has no default model available yet (no model was specified and neither live discovery nor the models.dev catalog lists any models for it). Specify a model or refresh model lists.`,
+      { category: 'config', provider: this.name, operation: 'chat', phase: 'request' },
+    );
   }
 
   isConfigured(): boolean {
@@ -214,7 +244,7 @@ export class AnthropicCompatProvider implements LLMProvider {
       ? `set ${this.authEnvVars.join(' or ')}, or store a key for "${this.name}"`
       : `configure credentials for "${this.name}"`;
     throw new ProviderError(
-      `Provider "${this.name}" has no API key configured, the request for model "${model ?? this.defaultModel}" was not sent. To use this provider, ${keyHint}.`,
+      `Provider "${this.name}" has no API key configured, the request for model "${model ?? this.defaultModel ?? 'default'}" was not sent. To use this provider, ${keyHint}.`,
     );
   }
 
@@ -267,17 +297,16 @@ export class AnthropicCompatProvider implements LLMProvider {
     // A key that is absent because the secret store could not be read is said as such, never "no API key configured".
     if (!this.isConfigured()) {
       const unreadable = await processSecretStoreUnreadable(this.authEnvVars[0] ?? 'GOODVIBES_STORE_READABLE_CHECK', `the "${this.name}" API key`);
-      if (unreadable) throw new ProviderError(`${unreadable} The request for model "${model ?? this.defaultModel}" was not sent.`);
+      if (unreadable) throw new ProviderError(`${unreadable} The request for model "${model ?? this.defaultModel ?? 'default'}" was not sent.`);
     }
     this.assertConfiguredForChat(model);
+    const resolvedModel = this.resolveChatModel(model);
 
     return (await instrumentedLlmCall(
       () => withRetry(async () => {
-      const resolvedModel = model ?? this.defaultModel;
-
       const body: Record<string, unknown> = {
         model: resolvedModel,
-        max_tokens: maxTokens ?? documentedMaxOutput(model),
+        max_tokens: maxTokens ?? documentedMaxOutput(resolvedModel),
         messages: toAnthropicMessages(messages),
         stream: true,
       };
@@ -374,7 +403,7 @@ export class AnthropicCompatProvider implements LLMProvider {
         ...withProviderStopReason(state.rawStopReason),
         ...(rateLimit ? { rateLimit } : {}),
       };
-    }, { ...this.retryConfig, ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, onRetry), { provider: this.name, model: model ?? this.defaultModel })).result;
+    }, { ...this.retryConfig, ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, onRetry), { provider: this.name, model: resolvedModel })).result;
   }
 
   async describeRuntime(deps: ProviderRuntimeMetadataDeps): Promise<ProviderRuntimeMetadata> {
@@ -410,7 +439,7 @@ export class AnthropicCompatProvider implements LLMProvider {
         routes: authRoutes,
       },
       models: {
-        defaultModel: this.defaultModel,
+        ...(this.defaultModel ? { defaultModel: this.defaultModel } : {}),
         models: this.models,
         ...(this.aliases.length > 0 ? { aliases: this.aliases } : {}),
       },

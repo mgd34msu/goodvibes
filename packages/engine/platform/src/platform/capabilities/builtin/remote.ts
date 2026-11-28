@@ -13,7 +13,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { callerPathOf, fileWorkRefusal, readCallerJson, unreadableFile } from '../path-inputs.js';
 import { getDefaultAcpAgentCommand } from '../../acp/manager.js';
-import { AGENT_TEMPLATES } from '../../tools/agent/manager.js';
+import { BUILTIN_AGENT_TEMPLATES } from '../../agents/builtin-templates.js';
 import type { DaemonRemoteRunners } from '../../runtime/remote/daemon-runners.js';
 import type { RemoteRunnerContract, RemoteSessionBundle } from '../../runtime/remote/types.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -47,7 +47,7 @@ const ARTIFACT: InputDescription = { id: 'artifact', label: 'Handed back', help:
 const PATH = (help: string): InputDescription => ({ id: 'path', label: 'File', help, kind: 'path', file: 'read', freeTextReason: 'a file path in this project', required: true, typed: { position: 1 } });
 const OPTIONAL_PATH = (help: string): InputDescription => ({ id: 'path', label: 'File', help, kind: 'path', file: 'written', freeTextReason: 'a file path in this project', required: { default: '', defaultMeans: 'the usual place in this project' }, typed: { flag: '--to' } });
 const TASK: InputDescription = { id: 'task', label: 'Task', help: 'What the runner should do, in your own words', kind: 'long-text', freeTextReason: 'your own words', required: true, typed: { tail: true } };
-const TEMPLATE_CHOICES: readonly FixedChoice[] = Object.keys(AGENT_TEMPLATES).map((value) => ({ value, label: value[0]!.toUpperCase() + value.slice(1) }));
+const TEMPLATE_CHOICES: readonly FixedChoice[] = BUILTIN_AGENT_TEMPLATES.map(({ name: value }) => ({ value, label: value[0]!.toUpperCase() + value.slice(1) }));
 const TEMPLATE = (means: string): InputDescription => ({ id: 'template', label: 'Kind of agent', help: 'Which agent template it follows', kind: 'choice', choices: TEMPLATE_CHOICES, required: { default: '', defaultMeans: means }, typed: { flag: '--template' } });
 const DISPATCH_OWNER = { reason: 'it starts a runner with this machine\'s tools from your own words', instead: 'Ask the owner to start it from the Work place.' } as const;
 

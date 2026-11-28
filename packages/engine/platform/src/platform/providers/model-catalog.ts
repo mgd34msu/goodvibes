@@ -59,6 +59,12 @@ export interface CatalogModel {
    * Absent means the entry carried no modality block at all.
    */
   inputModalities?: readonly string[] | undefined;
+  /**
+   * Normalized benchmark rank score in [0, 1] computed programmatically from the
+   * model's `models.dev` benchmark entries across the snapshot. Absent when the
+   * catalog carries no comparable numeric benchmarks for this model.
+   */
+  benchmarkScore?: number | undefined;
 }
 
 export interface PricingCatalog {

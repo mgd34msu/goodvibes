@@ -272,7 +272,9 @@ export type {
 export { ProviderSetupReadings, classifyProviderSetup, describeProviderSetup, providerSetupFrom, providerSetupState } from './provider-setup.js';
 export type { ProviderSetupClass, ProviderSetupClassification, ProviderSetupFacts, ProviderSetupReadOptions } from './provider-setup.js';
 
-export { installCatalogModelFacts, catalogTextWork, modelPriceTier, MODEL_PRICE_TIER_WORDS } from './model-catalog-facts.js';
+export { installCatalogModelFacts, catalogModelsForProvider, catalogModelBenchmarkScore, catalogTextWork, modelPriceTier, MODEL_PRICE_TIER_WORDS } from './model-catalog-facts.js';
+export { resolveProviderDefaultModel, rankProviderModels } from './provider-default-model.js';
+export type { ProviderDefaultModelOptions } from './provider-default-model.js';
 export { recommendModels, MAX_RECOMMENDED } from './model-recommendations.js';
 export type { RecommendationCandidate } from './model-recommendations.js';
 export type { CatalogTextWork, ModelPriceTier } from './model-catalog-facts.js';

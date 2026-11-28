@@ -16,4 +16,4 @@
 
 ## Everything in one file
 
-- [GoodVibes, complete](llms-full.txt): every part above in one file, with the generated lists filled in (3089706 bytes).
+- [GoodVibes, complete](llms-full.txt): every part above in one file, with the generated lists filled in (3091733 bytes).

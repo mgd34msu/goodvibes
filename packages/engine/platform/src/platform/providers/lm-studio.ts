@@ -74,7 +74,7 @@ export class LMStudioProvider implements LLMProvider {
     this.models = [...(opts.models ?? [])];
     this.capabilities = opts.capabilities;
     this.cacheCapability = opts.cacheCapability ?? getCacheCapability(opts.name);
-    this.defaultModel = opts.defaultModel;
+    this.defaultModel = opts.defaultModel ?? opts.models?.[0] ?? '';
     this.nativeChatUrl = deriveNativeChatUrl(opts.baseURL);
     this.nativeFetch = opts.nativeFetch ?? instrumentedFetch;
     this.responsesClient = opts.responsesClient ?? createResponsesClient(opts.baseURL, opts.apiKey, opts.defaultHeaders);
@@ -166,7 +166,7 @@ export class LMStudioProvider implements LLMProvider {
         routes: authRoutes,
       },
       models: {
-        defaultModel: this.defaultModel,
+        ...(this.defaultModel ? { defaultModel: this.defaultModel } : {}),
         models: this.models,
       },
       usage: {

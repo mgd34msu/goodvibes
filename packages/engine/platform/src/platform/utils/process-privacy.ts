@@ -13,7 +13,7 @@
  * Elsewhere (macOS, Windows) nothing is done: the operating system keeps other processes out of a process's memory by
  * its own rules, and its environment is not a file another process reads.
  */
-import { dlopen, FFIType } from 'bun:ffi';
+import { createRequire } from 'node:module';
 
 /** prctl's option that sets whether the process may be dumped or read through /proc by its own account (linux/prctl.h). */
 const PR_SET_DUMPABLE = 4;
@@ -21,6 +21,13 @@ const PR_SET_DUMPABLE = 4;
 /** Set whether this process may be read through /proc by its own account (Linux). True when it took effect. */
 function setDumpable(value: 0 | 1): boolean {
   if (process.platform !== 'linux') return false;
+  let ffi: typeof import('bun:ffi');
+  try {
+    ffi = createRequire(import.meta.url)('bun:ffi') as typeof import('bun:ffi');
+  } catch {
+    return false;
+  }
+  const { dlopen, FFIType } = ffi;
   for (const library of ['libc.so.6', 'libc.so', 'libc.musl-x86_64.so.1', 'libc.musl-aarch64.so.1']) {
     try {
       const libc = dlopen(library, {

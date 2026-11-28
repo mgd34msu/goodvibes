@@ -8,6 +8,7 @@
 // ('bedrock'), same credential resolution, different path.
 import { loadBedrockAuth, loadBedrockLibrary } from './optional-bedrock.js';
 import { AnthropicMessagesProvider, type AnthropicMessagesProviderOptions } from './anthropic-messages-provider.js';
+import { resolveProviderDefaultModel } from './provider-default-model.js';
 import type { ProviderModelSource } from './interface.js';
 import { diffModelIds, listingHttpError, runLiveModelRefresh, type LiveModelDiscoveryResult, type ProviderModelRefreshOptions } from './live-model-discovery.js';
 import { fetchWithTimeout, instrumentedFetch } from '../utils/fetch-with-timeout.js';
@@ -21,9 +22,6 @@ export const BEDROCK_PROVIDER_LABELS = {
   'amazon-bedrock': 'Amazon Bedrock',
   'amazon-bedrock-mantle': 'Amazon Bedrock (Mantle)',
 } as const;
-
-/** The model a Bedrock-family provider answers with when its current list includes it. */
-const BEDROCK_PREFERRED_DEFAULT_MODEL = 'claude-sonnet-4-6';
 
 /** AWS credentials as the environment and the registry give them, trimmed once. */
 export interface AwsCredentialFacts {
@@ -212,7 +210,13 @@ export class BedrockFamilyProvider extends AnthropicMessagesProvider {
     super({
       name: family.name,
       label,
-      defaultModel: BEDROCK_PREFERRED_DEFAULT_MODEL,
+      // Rank live-discovered Anthropic models first; before discovery, rank Bedrock's Anthropic rows in models.dev.
+      resolveDefaultModel: (models) => models.length > 0
+        ? resolveProviderDefaultModel('amazon-bedrock', { availableModels: models })
+        : resolveProviderDefaultModel('amazon-bedrock', {
+            filterModelId: (id) => bedrockModelName(id) !== id,
+            normalizeCatalogModelId: bedrockModelName,
+          }),
       // The account's listing, else the pinned catalog's Bedrock rows: no list is written here.
       models: [],
       // Async because `@anthropic-ai/bedrock-sdk` is resolved here rather than

@@ -1,4 +1,5 @@
 import { safeEndpointOrigin } from './provider-setup.js';
+import { resolveProviderDefaultModel } from './provider-default-model.js';
 import { ProviderAttemptDeniedError, revalidateProviderAttempt } from './attempt-guard.js';
 import type OpenAI from 'openai';
 import { createOpenAIClient } from './optional-openai.js';
@@ -97,7 +98,12 @@ export interface OpenAICompatOptions {
   name: string;
   baseURL: string;
   apiKey: string;
-  defaultModel: string;
+  /**
+   * Optional explicit default model (custom provider files, local servers, or
+   * test doubles). Built-in providers omit this so the default resolves
+   * programmatically from live discovery and the `models.dev` benchmark catalog.
+   */
+  defaultModel?: string | undefined;
   /**
    * Models declared for this provider by whoever set it up: a custom provider
    * file, a plugin, a local server's own answer. Builtins declare none: their
@@ -253,8 +259,8 @@ export class OpenAICompatProvider implements LLMProvider {
    * inside an async request path, so no public signature changes.
    */
   private openaiClient: Promise<OpenAI> | undefined;
-  private defaultModel: string;
-  private embeddingModel: string;
+  private readonly configuredDefaultModel: string | undefined;
+  private readonly configuredEmbeddingModel: string | undefined;
   private readonly configured: boolean;
   private reasoningFormat: NonNullable<OpenAICompatOptions['reasoningFormat']>;
   /** How this backend caches prompts; the capability registry reports it as this provider's caching. */
@@ -304,8 +310,8 @@ export class OpenAICompatProvider implements LLMProvider {
       ? (this.declaredModels.length > 0 ? { kind: 'dated-static', asOf: opts.modelsAsOf ?? 'declared' } : { kind: 'catalog-backed' })
       : { kind: 'live-discovery' };
     this.capabilities = opts.capabilities;
-    this.defaultModel = opts.defaultModel;
-    this.embeddingModel = opts.embeddingModel ?? opts.defaultModel;
+    this.configuredDefaultModel = opts.defaultModel?.trim() || undefined;
+    this.configuredEmbeddingModel = opts.embeddingModel?.trim() || undefined;
     this.configured = opts.authConfigured ?? Boolean(opts.apiKey);
     this.reasoningFormat = opts.reasoningFormat ?? 'none';
     this.cacheCapability = opts.cacheCapability ?? getCacheCapability(opts.name);
@@ -328,6 +334,31 @@ export class OpenAICompatProvider implements LLMProvider {
         return opts.baseURL;
       }
     })();
+  }
+
+  /**
+   * Programmatic default model for this provider: uses an explicit
+   * `opts.defaultModel` when given (and still offered when live models exist),
+   * otherwise resolves dynamically to the highest benchmark-ranked text model
+   * from `models.dev` (restricted to live-discovered models when present).
+   */
+  get defaultModel(): string | undefined {
+    if (this.configuredDefaultModel) {
+      if (this._models.length === 0 || this._models.includes(this.configuredDefaultModel)) {
+        return this.configuredDefaultModel;
+      }
+      return resolveProviderDefaultModel(this.name, { availableModels: this._models }) ?? this.configuredDefaultModel;
+    }
+    return resolveProviderDefaultModel(this.name, { availableModels: this._models });
+  }
+
+  private resolveChatModel(requested: string | undefined): string {
+    const resolved = requested?.trim() || this.defaultModel;
+    if (resolved) return resolved;
+    throw new ProviderError(
+      `Provider "${this.name}" has no default model available yet (no model was specified and neither live discovery nor the models.dev catalog lists any models for it). Specify a model or refresh model lists.`,
+      { category: 'config', provider: this.name, operation: 'chat', phase: 'request' },
+    );
   }
 
   /** The `openai` client for this provider, built once on first use. */
@@ -365,7 +396,7 @@ export class OpenAICompatProvider implements LLMProvider {
       ? `set ${this.authEnvVars.join(' or ')}, or store a key for "${this.name}"`
       : `configure credentials for "${this.name}"`;
     throw new ProviderError(
-      `Provider "${this.name}" has no API key configured, the request for model "${model ?? this.defaultModel}" was not sent. To use this provider, ${keyHint}.`,
+      `Provider "${this.name}" has no API key configured, the request for model "${model ?? this.defaultModel ?? 'default'}" was not sent. To use this provider, ${keyHint}.`,
     );
   }
 
@@ -415,9 +446,10 @@ export class OpenAICompatProvider implements LLMProvider {
     // A key that is absent because the secret store could not be read is said as such, never "no API key configured".
     if (!this.isConfigured()) {
       const unreadable = await processSecretStoreUnreadable(this.authEnvVars[0] ?? 'GOODVIBES_STORE_READABLE_CHECK', `the "${this.name}" API key`);
-      if (unreadable) throw new ProviderError(`${unreadable} The request for model "${model ?? this.defaultModel}" was not sent.`);
+      if (unreadable) throw new ProviderError(`${unreadable} The request for model "${model ?? this.defaultModel ?? 'default'}" was not sent.`);
     }
     this.assertConfiguredForChat(model);
+    const resolvedModel = this.resolveChatModel(model);
 
     return (await instrumentedLlmCall(() => withRetry(async () => {
       // Keeps returned reasoning out of the answer, in both shapes it arrives
@@ -434,7 +466,7 @@ export class OpenAICompatProvider implements LLMProvider {
       let reasoningSummaryText: string | undefined;
       let rateLimit: ChatResponse['rateLimit'];
       let rawToolCalls: OpenAIToolCall[] = [];
-      const selectedModel = model ?? this.defaultModel;
+      const selectedModel = resolvedModel;
       const requestFingerprint = buildChatRequestFingerprint(params, selectedModel);
 
       const { body: requestBody, headers: requestHeaders, effortValue } = buildCompatChatRequest(
@@ -615,15 +647,22 @@ export class OpenAICompatProvider implements LLMProvider {
       });
 
       return response;
-    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, onRetry), { provider: this.name, model: model ?? this.defaultModel })).result;
+    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, onRetry), { provider: this.name, model: resolvedModel })).result;
   }
 
   async embed(request: ProviderEmbeddingRequest): Promise<ProviderEmbeddingResult> {
+    const embeddingModel = request.model ?? this.configuredEmbeddingModel ?? this.defaultModel;
+    if (!embeddingModel) {
+      throw new ProviderError(
+        `Provider "${this.name}" has no embedding model configured or resolved yet. Specify a model or configure an embedding model.`,
+        { category: 'config', provider: this.name, operation: 'embed', phase: 'request' },
+      );
+    }
     let response;
     try {
       response = await (await this.client()).embeddings.create(
         {
-          model: request.model ?? this.embeddingModel,
+          model: embeddingModel,
           input: request.text,
           ...(request.dimensions ? { dimensions: request.dimensions } : {}),
         },
@@ -676,6 +715,8 @@ export class OpenAICompatProvider implements LLMProvider {
           ? (anonymousDetail ?? `${this.name} can be used without a stored API key`)
           : `API key for ${this.name} is not configured`,
     }, authRoutes);
+    const defaultModel = this.defaultModel;
+    const embeddingModel = this.configuredEmbeddingModel ?? defaultModel;
     return {
       setup: {
         ...(this.setupDescription ?? this.anonymousDetail ? { description: this.setupDescription ?? this.anonymousDetail } : {}),
@@ -689,9 +730,9 @@ export class OpenAICompatProvider implements LLMProvider {
         routes: authRoutes,
       },
       models: {
-        defaultModel: this.defaultModel,
+        ...(defaultModel ? { defaultModel } : {}),
         models: this.models,
-        embeddingModel: this.embeddingModel,
+        ...(embeddingModel ? { embeddingModel } : {}),
         ...(this.aliases.length > 0 ? { aliases: this.aliases } : {}),
         ...(this.suppressedModelRegistryKeys.length > 0
           ? { suppressedModelRegistryKeys: this.suppressedModelRegistryKeys }
@@ -713,11 +754,11 @@ export class OpenAICompatProvider implements LLMProvider {
         // Omitted when this backend sends no reasoning field at all; otherwise
         // the default model's resolved levels, which is what a request for that
         // model would actually be mapped onto.
-        ...(this.reasoningFormat === 'none'
+        ...(this.reasoningFormat === 'none' || !defaultModel
           ? {}
           : {
               supportedReasoningEfforts: reasoningEffortLevels(
-                resolveReasoningEffortSpec({ provider: this.name, modelId: this.defaultModel }),
+                resolveReasoningEffortSpec({ provider: this.name, modelId: defaultModel }),
               ),
             }),
         cacheStrategy: this.cacheCapability.type,

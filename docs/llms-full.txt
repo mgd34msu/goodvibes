@@ -2270,7 +2270,7 @@ With a key for a provider present, the first start asks nothing about the model:
 
 `goodvibes` and `goodvibes-agent` run the same first run. It opens exactly when the model the session will use is not ready (its provider has no key or sign-in and is not keyless); a ready model opens the conversation directly and writes the first-run marker (`~/.goodvibes/tui/onboarding-checked.json`, the Agent's under `~/.goodvibes/agent/`). Leaving at any step and starting again picks up from the facts: a provider chosen in settings but not signed in opens step 2 for it; otherwise step 1.
 
-**A provider key already there is used; nothing is asked about the model.** When a provider is usable through a key in the environment (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, …), a key in the secret store or a sign-in, first run asks no "which model" question: it uses that provider with its own default model and goes straight to the conversation. This holds on a first launch whose model is ready only as the product's default (`provider.model` not set by you) too. With more than one usable, it takes the first in the order step 1 lists them (ChatGPT subscription, Anthropic, OpenRouter, then the others by name); a provider that needs no key and a model server on this computer are not taken this way. The choice is said in one line under the splash, never asked: `Using Anthropic (claude-sonnet-4-5) from ANTHROPIC_API_KEY; change it with the model control.` (`from your stored key`, `from your sign-in`). The steps below show only when nothing usable is found.
+**A provider key already there is used; nothing is asked about the model.** When a provider is usable through a key in the environment (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, …), a key in the secret store or a sign-in, first run asks no "which model" question: it uses that provider with its programmatic default model (the highest benchmark-ranked text model it offers in `models.dev`, refreshed with the catalog) and goes straight to the conversation. This holds on a first launch whose model is ready only as the product's default (`provider.model` not set by you) too. With more than one usable, it takes the first in the order step 1 lists them (ChatGPT subscription, Anthropic, OpenRouter, then the others by name); a provider that needs no key and a model server on this computer are not taken this way. The choice is said in one line under the splash, never asked: `Using Anthropic (<model>) from ANTHROPIC_API_KEY; change it with the model control.` (`from your stored key`, `from your sign-in`). The steps below show only when nothing usable is found.
 
 **Step 1, `Welcome to GoodVibes` (`1 of 3`, `1 of 4` when "Who decides" follows): `Which model should answer you?`** One row per offer, then `Another provider…` with the count of the other providers the full provider picker lists (the providers that have a model, the internal decision router left out; the picker shows the same list):
 
@@ -3974,7 +3974,7 @@ What changes what:
 
 | Action | Changes |
 | --- | --- |
-| "make it the default" on a model, or "use its first model by default" on a provider, in Models and providers; `goodvibes models use <id>` / `goodvibes-agent models use <id>` | The shared default model, for every program. |
+| "make it the default" on a model, or "use its default model" on a provider (which picks that provider's highest benchmark-ranked text model from `models.dev`), in Models and providers; `goodvibes models use <id>` / `goodvibes-agent models use <id>` | The shared default model, for every program. |
 | "How hard the model thinks" and "When GoodVibes asks" in Settings | The shared default effort and mode, for every program. |
 | `/model use <id>`, picking a model in the model picker, `@model:<id>` in a prompt | This conversation's model only. |
 | "Choose how hard the model thinks" in This conversation; Shift+Tab | This conversation's effort or mode only. |
@@ -23749,52 +23749,54 @@ Codes the shared request layer and the daemon's routes put in `code` beyond thos
 
 Every built-in model provider: the id used in `provider:model` names and in settings, its display name, the other names it answers to, the environment variables it reads its key from, the ways to sign in, its API base address and the model it uses when none is named.
 
+Built-in providers do not hardcode default model IDs: each provider's default resolves programmatically when the `models.dev` catalog or live model list refreshes, selecting the highest benchmark-ranked text model it serves (falling back to tool-capable models by newest release date when unbenchmarked).
+
 | Provider id | Name | Aliases | Credential variables | Sign-ins | Base URL | Default model |
 | --- | --- | --- | --- | --- | --- | --- |
-| `aihubmix` | Aihubmix |  | `AIHUBMIX_API_KEY` | API key | `https://aihubmix.com/v1` | `gpt-4.1-free` |
-| `amazon-bedrock` | Amazon Bedrock |  | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_PROFILE` | API key | the provider's own | `claude-sonnet-4-6` |
-| `amazon-bedrock-mantle` | Amazon Bedrock (Mantle) |  | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_PROFILE` | API key | the provider's own | `claude-sonnet-4-6` |
-| `anthropic` | Anthropic |  | `ANTHROPIC_API_KEY`, `CLAUDE_API_KEY` | API key | the provider's own | from its model list |
-| `anthropic-vertex` | Anthropic (Vertex) |  | `GOOGLE_APPLICATION_CREDENTIALS`, `ANTHROPIC_VERTEX_PROJECT_ID`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_PROJECT_ID` | API key | the provider's own | `claude-sonnet-4-6` |
-| `cerebras` | Cerebras |  | `CEREBRAS_API_KEY` | API key | `https://api.cerebras.ai/v1` | `qwen-3-235b-a22b-instruct-2507` |
-| `cloudflare-ai-gateway` | Cloudflare AI Gateway | `cloudflare-gateway` | `CLOUDFLARE_AI_GATEWAY_API_KEY` | API key | `https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/openai` | `gpt-5.6` |
-| `cohere` | Cohere |  | `COHERE_API_KEY`, `CO_API_KEY` | API key | `https://api.cohere.ai/compatibility/v1` | `command-a-03-2025` |
-| `copilot-proxy` | Copilot Proxy |  | `COPILOT_PROXY_API_KEY` | API key, no key needed | `http://localhost:3000/v1` | `gpt-5.6` |
-| `deepinfra` | DeepInfra |  | `DEEPINFRA_API_KEY` | API key | `https://api.deepinfra.com/v1/openai` | `moonshotai/Kimi-K2-Instruct` |
-| `deepseek` | DeepSeek | `deepseek-ai` | `DEEPSEEK_API_KEY` | API key | `https://api.deepseek.com` | `deepseek-chat` |
-| `fireworks` | Fireworks |  | `FIREWORKS_API_KEY` | API key | `https://api.fireworks.ai/inference/v1` | `accounts/fireworks/routers/kimi-k2p5-turbo` |
-| `gemini` | Gemini |  | `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_GEMINI_API_KEY` | API key | the provider's own | from its model list |
-| `github-copilot` | GitHub Copilot |  | `COPILOT_GITHUB_TOKEN` | API key | the provider's own | from its model list |
-| `groq` | Groq |  | `GROQ_API_KEY` | API key | `https://api.groq.com/openai/v1` | `qwen/qwen3-32b` |
-| `huggingface` | Hugging Face |  | `HF_API_KEY`, `HUGGINGFACE_API_KEY`, `HF_TOKEN`, `HUGGING_FACE_HUB_TOKEN` | API key | `https://router.huggingface.co/v1` | `deepseek-ai/DeepSeek-V3.2` |
-| `inceptionlabs` | Inception Labs | `inception` | `INCEPTION_API_KEY` | API key | `https://api.inceptionlabs.ai/v1` | `mercury-2` |
-| `litellm` | LiteLLM |  | `LITELLM_API_KEY` | API key, no key needed | `http://localhost:4000/v1` | `claude-opus-4-8` |
-| `llm7` | LLM7 |  | `LLM7_API_KEY` | API key | `https://api.llm7.io/v1` | `codestral-latest` |
-| `microsoft-foundry` | Microsoft Foundry | `azure-openai`, `azure-openai-responses` | `AZURE_OPENAI_API_KEY` | API key | `https://endpoint-not-configured.invalid/openai/v1` | `gpt-5.6` |
-| `minimax` | MiniMax |  | `MINIMAX_API_KEY` | API key | `https://api.minimax.io/anthropic` | `MiniMax-M2.7` |
-| `mistral` | Mistral |  | `MISTRAL_API_KEY` | API key | `https://api.mistral.ai/v1` | `mistral-large-latest` |
-| `moonshot` | Moonshot |  | `MOONSHOT_API_KEY` | API key | `https://api.moonshot.ai/v1` | `kimi-k2.5` |
-| `nvidia` | NVIDIA |  | `NVIDIA_API_KEY`, `NIM_API_KEY` | API key | `https://integrate.api.nvidia.com/v1` | `deepseek-ai/deepseek-v3.2` |
-| `ollama-cloud` | Ollama Cloud |  | `OLLAMA_CLOUD_API_KEY`, `OLLAMA_API_KEY` | API key | `https://ollama.com/v1` | `deepseek-v3.2` |
-| `openai` | OpenAI |  | `OPENAI_API_KEY`, `OPENAI_KEY` | API key, subscription (OpenAI Codex) | the provider's own | from its model list |
-| `opencode-zen` | OpenCode Zen |  | `OPENCODE_ZEN_API_KEY`, `OPENCODE_API_KEY` | API key | `https://opencode.ai/zen/v1` | `qwen3-coder` |
-| `openrouter` | Openrouter |  | `OPENROUTER_API_KEY` | API key | `https://openrouter.ai/api/v1` | `openrouter/free` |
-| `perplexity` | Perplexity |  | `PERPLEXITY_API_KEY` | API key | `https://api.perplexity.ai` | `sonar-pro` |
-| `qianfan` | Qianfan |  | `QIANFAN_API_KEY` | API key | `https://qianfan.baidubce.com/v2` | `deepseek-v3.2` |
-| `qwen` | Qwen | `dashscope` | `QWEN_API_KEY`, `DASHSCOPE_API_KEY`, `MODELSTUDIO_API_KEY` | API key | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `qwen3.5-plus` |
-| `sambanova` | SambaNova |  | `SAMBANOVA_API_KEY` | API key | `https://api.sambanova.ai/v1` | `Llama-4-Maverick-17B-128E-Instruct` |
-| `sglang` | SGLang |  | `SGLANG_API_KEY` | API key, no key needed | `http://127.0.0.1:30000/v1` | `default` |
-| `stepfun` | StepFun |  | `STEPFUN_API_KEY` | API key | `https://api.stepfun.ai/v1` | `step-3.5-flash` |
-| `synthetic` | Synthetic (Local) |  |  |  | the provider's own | from its model list |
-| `together` | Together AI |  | `TOGETHER_API_KEY` | API key | `https://api.together.xyz/v1` | `moonshotai/Kimi-K2.5` |
-| `venice` | Venice |  | `VENICE_API_KEY` | API key | `https://api.venice.ai/api/v1` | `kimi-k2-5` |
-| `vercel-ai-gateway` | Vercel AI Gateway | `ai-gateway` | `AI_GATEWAY_API_KEY` | API key | `https://ai-gateway.vercel.sh/v1` | `anthropic/claude-opus-4-8` |
-| `volcengine` | Volcengine | `volcano-engine` | `VOLCANO_ENGINE_API_KEY` | API key | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-seed-1-8-251228` |
-| `xai` | xAI | `x-ai` | `XAI_API_KEY` | API key | `https://api.x.ai/v1` | `grok-4` |
-| `xiaomi` | Xiaomi MiMo |  | `XIAOMI_API_KEY` | API key | `https://api.xiaomimimo.com/v1` | `mimo-v2-flash` |
-| `zai` | Z.ai | `z-ai` | `ZAI_API_KEY`, `Z_AI_API_KEY` | API key | `https://api.z.ai/api/paas/v4` | `glm-5` |
-| `zenmux` | ZenMux |  | `ZENMUX_API_KEY` | API key | `https://zenmux.ai/api/v1` | `gpt-5.4` |
-| `zenmux-anthropic` | ZenMux (Anthropic) |  | `ZENMUX_API_KEY` | API key | `https://zenmux.ai/api/anthropic/v1` | `claude-opus-4-6` |
+| `aihubmix` | Aihubmix |  | `AIHUBMIX_API_KEY` | API key | `https://aihubmix.com/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `amazon-bedrock` | Amazon Bedrock |  | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_PROFILE` | API key | the provider's own | highest benchmark-ranked in models.dev (or live list) |
+| `amazon-bedrock-mantle` | Amazon Bedrock (Mantle) |  | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_PROFILE` | API key | the provider's own | highest benchmark-ranked in models.dev (or live list) |
+| `anthropic` | Anthropic |  | `ANTHROPIC_API_KEY`, `CLAUDE_API_KEY` | API key | the provider's own | highest benchmark-ranked in models.dev (or live list) |
+| `anthropic-vertex` | Anthropic (Vertex) |  | `GOOGLE_APPLICATION_CREDENTIALS`, `ANTHROPIC_VERTEX_PROJECT_ID`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_PROJECT_ID` | API key | the provider's own | highest benchmark-ranked in models.dev (or live list) |
+| `cerebras` | Cerebras |  | `CEREBRAS_API_KEY` | API key | `https://api.cerebras.ai/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `cloudflare-ai-gateway` | Cloudflare AI Gateway | `cloudflare-gateway` | `CLOUDFLARE_AI_GATEWAY_API_KEY` | API key | `https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/openai` | highest benchmark-ranked in models.dev (or live list) |
+| `cohere` | Cohere |  | `COHERE_API_KEY`, `CO_API_KEY` | API key | `https://api.cohere.ai/compatibility/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `copilot-proxy` | Copilot Proxy |  | `COPILOT_PROXY_API_KEY` | API key, no key needed | `http://localhost:3000/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `deepinfra` | DeepInfra |  | `DEEPINFRA_API_KEY` | API key | `https://api.deepinfra.com/v1/openai` | highest benchmark-ranked in models.dev (or live list) |
+| `deepseek` | DeepSeek | `deepseek-ai` | `DEEPSEEK_API_KEY` | API key | `https://api.deepseek.com` | highest benchmark-ranked in models.dev (or live list) |
+| `fireworks` | Fireworks |  | `FIREWORKS_API_KEY` | API key | `https://api.fireworks.ai/inference/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `gemini` | Gemini |  | `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_GEMINI_API_KEY` | API key | the provider's own | highest benchmark-ranked in models.dev (or live list) |
+| `github-copilot` | GitHub Copilot |  | `COPILOT_GITHUB_TOKEN` | API key | the provider's own | highest benchmark-ranked in models.dev (or live list) |
+| `groq` | Groq |  | `GROQ_API_KEY` | API key | `https://api.groq.com/openai/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `huggingface` | Hugging Face |  | `HF_API_KEY`, `HUGGINGFACE_API_KEY`, `HF_TOKEN`, `HUGGING_FACE_HUB_TOKEN` | API key | `https://router.huggingface.co/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `inceptionlabs` | Inception Labs | `inception` | `INCEPTION_API_KEY` | API key | `https://api.inceptionlabs.ai/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `litellm` | LiteLLM |  | `LITELLM_API_KEY` | API key, no key needed | `http://localhost:4000/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `llm7` | LLM7 |  | `LLM7_API_KEY` | API key | `https://api.llm7.io/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `microsoft-foundry` | Microsoft Foundry | `azure-openai`, `azure-openai-responses` | `AZURE_OPENAI_API_KEY` | API key | `https://endpoint-not-configured.invalid/openai/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `minimax` | MiniMax |  | `MINIMAX_API_KEY` | API key | `https://api.minimax.io/anthropic` | highest benchmark-ranked in models.dev (or live list) |
+| `mistral` | Mistral |  | `MISTRAL_API_KEY` | API key | `https://api.mistral.ai/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `moonshot` | Moonshot |  | `MOONSHOT_API_KEY` | API key | `https://api.moonshot.ai/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `nvidia` | NVIDIA |  | `NVIDIA_API_KEY`, `NIM_API_KEY` | API key | `https://integrate.api.nvidia.com/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `ollama-cloud` | Ollama Cloud |  | `OLLAMA_CLOUD_API_KEY`, `OLLAMA_API_KEY` | API key | `https://ollama.com/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `openai` | OpenAI |  | `OPENAI_API_KEY`, `OPENAI_KEY` | API key, subscription (OpenAI Codex) | the provider's own | highest benchmark-ranked in models.dev (or live list) |
+| `opencode-zen` | OpenCode Zen |  | `OPENCODE_ZEN_API_KEY`, `OPENCODE_API_KEY` | API key | `https://opencode.ai/zen/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `openrouter` | Openrouter |  | `OPENROUTER_API_KEY` | API key | `https://openrouter.ai/api/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `perplexity` | Perplexity |  | `PERPLEXITY_API_KEY` | API key | `https://api.perplexity.ai` | highest benchmark-ranked in models.dev (or live list) |
+| `qianfan` | Qianfan |  | `QIANFAN_API_KEY` | API key | `https://qianfan.baidubce.com/v2` | highest benchmark-ranked in models.dev (or live list) |
+| `qwen` | Qwen | `dashscope` | `QWEN_API_KEY`, `DASHSCOPE_API_KEY`, `MODELSTUDIO_API_KEY` | API key | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `sambanova` | SambaNova |  | `SAMBANOVA_API_KEY` | API key | `https://api.sambanova.ai/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `sglang` | SGLang |  | `SGLANG_API_KEY` | API key, no key needed | `http://127.0.0.1:30000/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `stepfun` | StepFun |  | `STEPFUN_API_KEY` | API key | `https://api.stepfun.ai/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `synthetic` | Synthetic (Local) |  |  |  | the provider's own | highest benchmark-ranked in models.dev (or live list) |
+| `together` | Together AI |  | `TOGETHER_API_KEY` | API key | `https://api.together.xyz/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `venice` | Venice |  | `VENICE_API_KEY` | API key | `https://api.venice.ai/api/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `vercel-ai-gateway` | Vercel AI Gateway | `ai-gateway` | `AI_GATEWAY_API_KEY` | API key | `https://ai-gateway.vercel.sh/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `volcengine` | Volcengine | `volcano-engine` | `VOLCANO_ENGINE_API_KEY` | API key | `https://ark.cn-beijing.volces.com/api/v3` | highest benchmark-ranked in models.dev (or live list) |
+| `xai` | xAI | `x-ai` | `XAI_API_KEY` | API key | `https://api.x.ai/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `xiaomi` | Xiaomi MiMo |  | `XIAOMI_API_KEY` | API key | `https://api.xiaomimimo.com/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `zai` | Z.ai | `z-ai` | `ZAI_API_KEY`, `Z_AI_API_KEY` | API key | `https://api.z.ai/api/paas/v4` | highest benchmark-ranked in models.dev (or live list) |
+| `zenmux` | ZenMux |  | `ZENMUX_API_KEY` | API key | `https://zenmux.ai/api/v1` | highest benchmark-ranked in models.dev (or live list) |
+| `zenmux-anthropic` | ZenMux (Anthropic) |  | `ZENMUX_API_KEY` | API key | `https://zenmux.ai/api/anthropic/v1` | highest benchmark-ranked in models.dev (or live list) |
 
 The usual addresses of local model servers, which GoodVibes looks for when no address is configured:
 

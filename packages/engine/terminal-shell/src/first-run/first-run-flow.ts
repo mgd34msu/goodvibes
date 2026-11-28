@@ -264,7 +264,7 @@ export async function gatherProviderFacts(registry: ProviderRegistry): Promise<P
   return { providers, pickerProviders: choosableProviderIds(registry) };
 }
 
-/** The model a provider answers with when chosen in first run: its declared default, else its first selectable model. */
+/** The model a provider answers with when chosen in first run: its programmatic benchmark-ranked default, else its first selectable model. */
 async function providerModel(registry: ProviderRegistry, providerId: string): Promise<SelectedModel | null> {
   const models = registry.getSelectableModels().filter((model) => model.provider === providerId);
   let preferred: string | undefined;

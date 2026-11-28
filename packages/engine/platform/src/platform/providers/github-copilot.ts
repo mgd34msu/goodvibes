@@ -8,6 +8,7 @@ import { buildStandardProviderAuthRoutes, summarizeProviderAuth } from './runtim
 import { listingHttpError, runLiveModelRefresh, type LiveModelDiscoveryResult, type ProviderModelRefreshOptions } from './live-model-discovery.js';
 import { toProviderError } from '../utils/error-display.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
+import { resolveProviderDefaultModel } from './provider-default-model.js';
 
 
 export interface GitHubCopilotProviderOptions {
@@ -334,6 +335,7 @@ export class GitHubCopilotProvider implements LLMProvider {
         ? 'A GitHub token set for Copilot is available; it is exchanged when a Copilot model is used.'
         : 'Set COPILOT_GITHUB_TOKEN, or store a GitHub token for "github-copilot", to use GitHub Copilot.',
     }, authRoutes);
+    const defaultModel = resolveProviderDefaultModel(this.name, { availableModels: this.models });
     return {
       auth: {
         mode: 'api-key',
@@ -343,7 +345,7 @@ export class GitHubCopilotProvider implements LLMProvider {
         routes: authRoutes,
       },
       models: {
-        ...(this.models[0] ? { defaultModel: this.models[0] } : {}),
+        ...(defaultModel ? { defaultModel } : {}),
         models: this.models,
         aliases: ['copilot'],
       },

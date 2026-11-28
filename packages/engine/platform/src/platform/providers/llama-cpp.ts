@@ -92,7 +92,7 @@ export class LlamaCppProvider implements LLMProvider {
     this.models = [...(opts.models ?? [])];
     this.capabilities = opts.capabilities;
     this.cacheCapability = opts.cacheCapability ?? getCacheCapability(opts.name);
-    this.defaultModel = opts.defaultModel;
+    this.defaultModel = opts.defaultModel ?? opts.models?.[0] ?? '';
     this.reasoningFormat = opts.reasoningFormat ?? 'none';
     this.nativeChatUrl = deriveLlamaCppChatUrl(opts.baseURL);
     this.nativeFetch = opts.nativeFetch ?? instrumentedFetch;
@@ -180,7 +180,7 @@ export class LlamaCppProvider implements LLMProvider {
         routes: authRoutes,
       },
       models: {
-        defaultModel: this.defaultModel,
+        ...(this.defaultModel ? { defaultModel: this.defaultModel } : {}),
         models: this.models,
       },
       usage: {

@@ -94,12 +94,36 @@ the normal environment/secret setup described above.
 
 
 `openrouter` and `aihubmix` are registered the same way as every other row
-above (a built-in entry with a fixed base URL and a default model; its model
-list is its own listing, else its last listing on disk, else the pinned model
-catalog's rows for it), but
-neither has an entry in the curated brand-label map, so `GET /api/models`
-reports them with the id's default capitalization rather than a designed
-brand label. This is current behavior, not a documentation simplification.
+above (a built-in entry with a fixed base URL; its model list is its own
+listing, else its last listing on disk, else the pinned model catalog's rows
+for it, and its default model resolves programmatically from `models.dev`
+benchmarks), but neither has an entry in the curated brand-label map, so
+`GET /api/models` reports them with the id's default capitalization rather than
+a designed brand label. This is current behavior, not a documentation
+simplification.
+
+## Programmatic provider default models
+
+Built-in providers do **not** hardcode default model IDs. Instead, every
+provider's default model is computed programmatically by
+`resolveProviderDefaultModel` and updates automatically whenever the
+`models.dev` catalog or a provider's live model listing refreshes:
+
+1. **Benchmark ranking from `models.dev`.** When the `models.dev` snapshot is
+   parsed, each model's `[[benchmarks]]` entries are normalized across shared
+   benchmarks into a `[0, 1]` `benchmarkScore` (Bayesian-damped so a single
+   niche leaderboard cannot outrank a model proven across many benchmarks). The
+   provider's highest benchmark-ranked text/chat model becomes its default.
+2. **Live discovery constraint.** Once a provider has returned its own live
+   model list (or when a custom/local server declares its models), ranking is
+   restricted to models that endpoint actually offers.
+3. **Unbenchmarked fallback.** If none of a provider's models carry
+   `models.dev` benchmark entries, selection prefers tool-calling text models
+   ordered by newest `releaseDate`, then the provider's live list order.
+4. **Honest absence.** Before either `models.dev` or live discovery lists any
+   models for a provider (for example an unstarted local gateway), `defaultModel`
+   is omitted from runtime metadata and a chat call without an explicit `model`
+   fails with a clear configuration error rather than guessing a stale model ID.
 
 Many additional OpenAI-compatible providers ship through the built-in compat
 catalog (for example `stepfun`, `together`, `deepseek`, `fireworks`,

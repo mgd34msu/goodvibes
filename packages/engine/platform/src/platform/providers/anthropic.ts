@@ -43,6 +43,7 @@ import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { isRecord, toRecord } from '../utils/record-coerce.js';
 import { parseRateLimitHeaders } from './rate-limit-headers.js';
 import { trackDeliveredOutput } from './stream-delivery.js';
+import { resolveProviderDefaultModel } from './provider-default-model.js';
 
 const ANTHROPIC_API_BASE = 'https://api.anthropic.com/v1';
 
@@ -369,6 +370,7 @@ export class AnthropicProvider implements LLMProvider {
       configured: this.isConfigured(),
       detail: this.isConfigured() ? 'Anthropic API key available' : 'Anthropic API key is not configured',
     }, authRoutes);
+    const defaultModel = resolveProviderDefaultModel(this.name, { availableModels: this.models });
     return {
       auth: {
         mode: 'api-key',
@@ -378,6 +380,7 @@ export class AnthropicProvider implements LLMProvider {
         routes: authRoutes,
       },
       models: {
+        ...(defaultModel ? { defaultModel } : {}),
         models: this.models,
       },
       usage: {

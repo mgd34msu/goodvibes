@@ -17,11 +17,6 @@ export interface BuiltinOpenAICompatDefinition extends BuiltinProviderDefinition
   readonly kind: 'openai-compat';
   readonly baseURL: string;
   /**
-   * The model a request without one uses. Not a list: the provider's models
-   * come from its own listing, else the pinned model catalog.
-   */
-  readonly defaultModel: string;
-  /**
    * 'openai-endpoint' (default) = live discovery from GET {baseURL}/models;
    * 'none' = the backend has no listing API (each 'none' is verified against
    * the backend's documentation, never assumed).
@@ -42,11 +37,6 @@ export interface BuiltinOpenAICompatDefinition extends BuiltinProviderDefinition
 export interface BuiltinAnthropicCompatDefinition extends BuiltinProviderDefinition {
   readonly kind: 'anthropic-compat';
   readonly baseURL: string;
-  /**
-   * The model a request without one uses. Not a list: the provider's models
-   * come from its own listing, else the pinned model catalog.
-   */
-  readonly defaultModel: string;
   /**
    * 'anthropic-endpoint' (default) = live discovery from GET {baseURL}/models;
    * 'none' = the backend has no listing API (each 'none' is verified against
@@ -71,6 +61,10 @@ export { BUILTIN_PROVIDER_ENV_KEYS, getBuiltinProviderEnvVars } from '../config/
 import { getBuiltinProviderEnvVars } from '../config/provider-credential-catalog.js';
 
 /**
+ * Built-in compat providers declare only stable transport and auth metadata;
+ * model lists and default models are never hardcoded here and resolve
+ * programmatically from live discovery and the `models.dev` benchmark catalog.
+ *
  * Reasoning-format audit, 2026-07-25: every entry below without an explicit
  * `reasoningFormat` sends no reasoning parameter at all. That is deliberate,
  * not an oversight, a format is only declared for a backend whose own current
@@ -92,7 +86,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('deepseek'),
     serviceNames: ['deepseek'],
     baseURL: 'https://api.deepseek.com',
-    defaultModel: 'deepseek-chat',
     aliases: ['deepseek-ai'],
   },
   {
@@ -102,7 +95,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('fireworks'),
     serviceNames: ['fireworks'],
     baseURL: 'https://api.fireworks.ai/inference/v1',
-    defaultModel: 'accounts/fireworks/routers/kimi-k2p5-turbo',
   },
   {
     kind: 'openai-compat',
@@ -113,7 +105,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     serviceNames: ['microsoft-foundry'],
     // Placeholder until an endpoint is configured; see builtin-registry.ts.
     baseURL: 'https://endpoint-not-configured.invalid/openai/v1',
-    defaultModel: 'gpt-5.6',
     aliases: ['azure-openai', 'azure-openai-responses'],
     streamProtocol: 'openai-sse',
   },
@@ -128,7 +119,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('minimax'),
     serviceNames: ['minimax'],
     baseURL: 'https://api.minimax.io/anthropic',
-    defaultModel: 'MiniMax-M2.7',
     streamProtocol: 'anthropic-sse',
   },
   {
@@ -138,7 +128,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('moonshot'),
     serviceNames: ['moonshot'],
     baseURL: 'https://api.moonshot.ai/v1',
-    defaultModel: 'kimi-k2.5',
   },
   {
     kind: 'openai-compat',
@@ -151,7 +140,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('qianfan'),
     serviceNames: ['qianfan'],
     baseURL: 'https://qianfan.baidubce.com/v2',
-    defaultModel: 'deepseek-v3.2',
   },
   {
     kind: 'openai-compat',
@@ -164,7 +152,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('qwen'),
     serviceNames: ['qwen'],
     baseURL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
-    defaultModel: 'qwen3.5-plus',
     aliases: ['dashscope'],
   },
   {
@@ -175,7 +162,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('sglang'),
     serviceNames: ['sglang'],
     baseURL: 'http://127.0.0.1:30000/v1',
-    defaultModel: 'default',
     allowAnonymous: true,
     anonymousConfigured: true,
     anonymousDetail: 'SGLang usually runs as a local OpenAI-compatible server.',
@@ -191,7 +177,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('stepfun'),
     serviceNames: ['stepfun'],
     baseURL: 'https://api.stepfun.ai/v1',
-    defaultModel: 'step-3.5-flash',
   },
   {
     kind: 'openai-compat',
@@ -200,7 +185,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('together'),
     serviceNames: ['together'],
     baseURL: 'https://api.together.xyz/v1',
-    defaultModel: 'moonshotai/Kimi-K2.5',
   },
   {
     kind: 'openai-compat',
@@ -209,7 +193,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('venice'),
     serviceNames: ['venice'],
     baseURL: 'https://api.venice.ai/api/v1',
-    defaultModel: 'kimi-k2-5',
   },
   {
     kind: 'openai-compat',
@@ -222,7 +205,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('volcengine'),
     serviceNames: ['volcengine'],
     baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
-    defaultModel: 'doubao-seed-1-8-251228',
     aliases: ['volcano-engine'],
   },
   {
@@ -237,7 +219,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('xai'),
     serviceNames: ['xai'],
     baseURL: 'https://api.x.ai/v1',
-    defaultModel: 'grok-4',
     aliases: ['x-ai'],
   },
   {
@@ -251,7 +232,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('xiaomi'),
     serviceNames: ['xiaomi'],
     baseURL: 'https://api.xiaomimimo.com/v1',
-    defaultModel: 'mimo-v2-flash',
   },
   {
     kind: 'openai-compat',
@@ -264,7 +244,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('zai'),
     serviceNames: ['zai'],
     baseURL: 'https://api.z.ai/api/paas/v4',
-    defaultModel: 'glm-5',
     aliases: ['z-ai'],
   },
   {
@@ -282,7 +261,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('cloudflare-ai-gateway'),
     serviceNames: ['cloudflare-ai-gateway'],
     baseURL: 'https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/openai',
-    defaultModel: 'gpt-5.6',
     aliases: ['cloudflare-gateway'],
   },
   {
@@ -292,7 +270,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('vercel-ai-gateway'),
     serviceNames: ['vercel-ai-gateway'],
     baseURL: 'https://ai-gateway.vercel.sh/v1',
-    defaultModel: 'anthropic/claude-opus-4-8',
     aliases: ['ai-gateway'],
   },
   {
@@ -302,7 +279,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('litellm'),
     serviceNames: ['litellm'],
     baseURL: `${WELL_KNOWN_LOCAL_ENDPOINTS.liteLLM}/v1`,
-    defaultModel: 'claude-opus-4-8',
     allowAnonymous: true,
     anonymousConfigured: true,
     anonymousDetail: 'LiteLLM commonly runs as a local or self-hosted gateway.',
@@ -314,7 +290,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('copilot-proxy'),
     serviceNames: ['copilot-proxy'],
     baseURL: `${WELL_KNOWN_LOCAL_ENDPOINTS.copilotProxy}/v1`,
-    defaultModel: 'gpt-5.6',
     allowAnonymous: true,
     anonymousConfigured: true,
     anonymousDetail: 'Copilot Proxy is an operator-managed local gateway.',
@@ -327,7 +302,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('cohere'),
     serviceNames: ['cohere'],
     baseURL: 'https://api.cohere.ai/compatibility/v1',
-    defaultModel: 'command-a-03-2025',
   },
   {
     kind: 'openai-compat',
@@ -336,7 +310,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('deepinfra'),
     serviceNames: ['deepinfra'],
     baseURL: 'https://api.deepinfra.com/v1/openai',
-    defaultModel: 'moonshotai/Kimi-K2-Instruct',
   },
   {
     kind: 'openai-compat',
@@ -345,7 +318,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('perplexity'),
     serviceNames: ['perplexity'],
     baseURL: 'https://api.perplexity.ai',
-    defaultModel: 'sonar-pro',
   },
   {
     kind: 'openai-compat',
@@ -354,7 +326,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('sambanova'),
     serviceNames: ['sambanova'],
     baseURL: 'https://api.sambanova.ai/v1',
-    defaultModel: 'Llama-4-Maverick-17B-128E-Instruct',
   },
   {
     kind: 'openai-compat',
@@ -364,7 +335,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('opencode-zen'),
     serviceNames: ['opencode-zen'],
     baseURL: 'https://opencode.ai/zen/v1',
-    defaultModel: 'qwen3-coder',
   },
   {
     kind: 'openai-compat',
@@ -373,7 +343,6 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('zenmux'),
     serviceNames: ['zenmux'],
     baseURL: 'https://zenmux.ai/api/v1',
-    defaultModel: 'gpt-5.4',
   },
   {
     kind: 'anthropic-compat',
@@ -382,6 +351,5 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     envVars: getBuiltinProviderEnvVars('zenmux-anthropic'),
     serviceNames: ['zenmux'],
     baseURL: 'https://zenmux.ai/api/anthropic/v1',
-    defaultModel: 'claude-opus-4-6',
   },
 ];

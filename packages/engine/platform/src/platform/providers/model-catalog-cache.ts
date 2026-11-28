@@ -45,6 +45,13 @@ interface ModelsDevModelLimit {
   output?: number | undefined;
 }
 
+interface ModelsDevBenchmark {
+  name?: string | undefined;
+  score?: number | string | undefined;
+  metric?: string | undefined;
+  dataset?: string | undefined;
+}
+
 interface ModelsDevModel {
   id?: string | undefined;
   canonical_model_id?: string | undefined;
@@ -64,14 +71,15 @@ interface ModelsDevModel {
   structured_output?: boolean | undefined;
   open_weights?: boolean | undefined;
   modalities?: { input?: string[] | undefined; output?: string[] | undefined } | undefined;
+  benchmarks?: ModelsDevBenchmark[] | undefined;
 }
 
 type ModelsDevResponse = Record<string, CatalogProviderShape>;
 
 /** The catalog is checked once a day; an unchanged archive answers the check with a 304. */
 const CATALOG_TTL_MS = 24 * 60 * 60 * 1000;
-/** Repository-backed cache with canonical identities, model types and capability facts. */
-const CATALOG_CACHE_VERSION = 8;
+/** Repository-backed cache with canonical identities, model types, capability facts and benchmark ranks. */
+const CATALOG_CACHE_VERSION = 9;
 
 export function getCatalogCachePath(cacheDir: string): string {
   return join(cacheDir, 'model-catalog.json');
@@ -156,9 +164,91 @@ function getReasoningOptions(value: unknown): ModelsDevReasoningOption[] | undef
   return options;
 }
 
+/** Prior weight and mean for Bayesian-shrunk normalized benchmark scoring across models.dev. */
+const BENCHMARK_PRIOR_WEIGHT = 2;
+const BENCHMARK_PRIOR_MEAN = 0.5;
+
+function benchmarkKey(entry: ModelsDevBenchmark): string | null {
+  if (typeof entry.name !== 'string' || !entry.name.trim()) return null;
+  const metric = typeof entry.metric === 'string' && entry.metric.toLowerCase().includes('elo') ? 'elo' : 'score';
+  const dataset = typeof entry.dataset === 'string' && entry.dataset.trim() ? `::${entry.dataset.trim().toLowerCase()}` : '';
+  return `${entry.name.trim().toLowerCase()}::${metric}${dataset}`;
+}
+
+function numericBenchmarkScore(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  return null;
+}
+
+/**
+ * Compute a normalized [0, 1] benchmark rank score per model from the
+ * `[[benchmarks]]` entries present in a `models.dev` snapshot.
+ *
+ * Each distinct (benchmark, metric-scale, dataset) key is min-max normalized
+ * across all unique canonical models that report a numeric score on it (keys
+ * with fewer than 2 distinct models or zero spread are ignored so a niche
+ * single-model leaderboard cannot distort rankings). Multiple harnesses for
+ * the same benchmark collapse to the model's best normalized score, and the
+ * per-model score is damped toward 0.5 (prior weight 2) so a model with one
+ * benchmark does not outrank a model proven across many benchmarks.
+ */
+function buildModelsDevBenchmarkScores(json: ModelsDevResponse): Map<string, number> {
+  const ranges = new Map<string, { min: number; max: number; models: Set<string> }>();
+  const perModelBenchmarks = new Map<string, Map<string, number>>();
+
+  for (const providerData of Object.values(json)) {
+    if (!providerData || typeof providerData !== 'object' || Array.isArray(providerData)) continue;
+    const providerModels = providerData.models;
+    if (!providerModels || typeof providerModels !== 'object' || Array.isArray(providerModels)) continue;
+    for (const [modelKey, modelData] of Object.entries(providerModels)) {
+      if (!modelData || typeof modelData !== 'object' || Array.isArray(modelData)) continue;
+      if (!Array.isArray(modelData.benchmarks) || modelData.benchmarks.length === 0) continue;
+      const modelId = typeof modelData.id === 'string' && modelData.id.trim() ? modelData.id : modelKey;
+      const canonicalKey = typeof modelData.canonical_model_id === 'string' && modelData.canonical_model_id.trim()
+        ? modelData.canonical_model_id.trim()
+        : modelId;
+      let modelScores = perModelBenchmarks.get(canonicalKey);
+      if (!modelScores) {
+        modelScores = new Map<string, number>();
+        perModelBenchmarks.set(canonicalKey, modelScores);
+      }
+      for (const entry of modelData.benchmarks) {
+        if (!entry || typeof entry !== 'object') continue;
+        const key = benchmarkKey(entry);
+        const score = numericBenchmarkScore(entry.score);
+        if (!key || score === null) continue;
+        const range = ranges.get(key) ?? { min: Infinity, max: -Infinity, models: new Set<string>() };
+        if (score < range.min) range.min = score;
+        if (score > range.max) range.max = score;
+        range.models.add(canonicalKey);
+        ranges.set(key, range);
+        const prev = modelScores.get(key);
+        if (prev === undefined || score > prev) modelScores.set(key, score);
+      }
+    }
+  }
+
+  const normalized = new Map<string, number>();
+  for (const [canonicalKey, modelScores] of perModelBenchmarks) {
+    let sum = 0;
+    let count = 0;
+    for (const [key, score] of modelScores) {
+      const range = ranges.get(key);
+      if (!range || range.models.size < 2 || range.max <= range.min) continue;
+      sum += (score - range.min) / (range.max - range.min);
+      count++;
+    }
+    if (count > 0) {
+      normalized.set(canonicalKey, Number(((sum + BENCHMARK_PRIOR_WEIGHT * BENCHMARK_PRIOR_MEAN) / (count + BENCHMARK_PRIOR_WEIGHT)).toFixed(6)));
+    }
+  }
+  return normalized;
+}
+
 function transformModelsDevResponse(input: unknown, access: ReadonlyMap<string, ProviderAccess | undefined>): CatalogModel[] {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) throw new Error('Model catalog root is not a provider map');
   const json = input as ModelsDevResponse;
+  const benchmarkScores = buildModelsDevBenchmarkScores(json);
   const models: CatalogModel[] = [];
   let skippedProviders = 0;
   let skippedProviderModelLists = 0;
@@ -231,6 +321,11 @@ function transformModelsDevResponse(input: unknown, access: ReadonlyMap<string, 
 
       const maxOutputTokens = typeof limit?.output === 'number' ? limit.output : undefined;
 
+      const canonicalKey = typeof modelData.canonical_model_id === 'string' && modelData.canonical_model_id.trim()
+        ? modelData.canonical_model_id.trim()
+        : modelId;
+      const benchmarkScore = benchmarkScores.get(canonicalKey);
+
       models.push({
         id: modelId,
         modelType: typeof modelData.type === 'string' ? modelData.type : 'chat',
@@ -251,6 +346,7 @@ function transformModelsDevResponse(input: unknown, access: ReadonlyMap<string, 
         ...(typeof reasoning === 'boolean' ? { reasoning } : {}),
         ...(reasoningOptions !== undefined ? { reasoningOptions } : {}),
         ...(inputModalities !== undefined ? { inputModalities } : {}),
+        ...(benchmarkScore !== undefined ? { benchmarkScore } : {}),
       });
     }
   }
@@ -270,9 +366,10 @@ function validateCatalogCache(value: unknown): { cache: CatalogCacheFile | null;
   const current = validateTtlCacheEnvelope<CatalogCacheFile>(value, 'models', 'array', CATALOG_CACHE_VERSION);
   if (current.cache) return current;
   // Preserve offline data, but refresh catalogs decoded before schema-2 support
-  // (5, 6) or before release dates were kept (7). Without its ETag the next check
-  // reads the archive whole instead of being told it is unchanged.
-  for (const version of [7, 6, 5]) {
+  // (5, 6), before release dates were kept (7), or before benchmark ranks were
+  // derived (8). Without its ETag the next check reads the archive whole
+  // instead of being told it is unchanged.
+  for (const version of [8, 7, 6, 5]) {
     const legacy = validateTtlCacheEnvelope<CatalogCacheFile>(value, 'models', 'array', version);
     if (legacy.cache) {
       const { etag: _unused, ...kept } = legacy.cache;

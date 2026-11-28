@@ -17,6 +17,9 @@ export const CATALOG_PROVIDER_NAME_ALIASES: Readonly<Record<string, string>> = O
   moonshotai: 'moonshot',
   vercel: 'vercel-ai-gateway',
   alibaba: 'qwen',
+  'google-vertex-anthropic': 'anthropic-vertex',
+  azure: 'microsoft-foundry',
+  opencode: 'opencode-zen',
 });
 
 // The native virtual provider owns its sole `auto` model. It has no external

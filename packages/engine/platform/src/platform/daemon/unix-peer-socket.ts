@@ -8,7 +8,7 @@
  * Linux on a 64-bit machine only (the structure layouts below are those of x86-64 and arm64); `openUnixPeerCalls`
  * answers undefined anywhere else, and the caller then issues no registration (nothing fails open).
  */
-import { dlopen, FFIType, ptr } from 'bun:ffi';
+import { createRequire } from 'node:module';
 import { shortSocketPath } from '../utils/short-socket-path.js';
 
 const AF_UNIX = 1;
@@ -83,6 +83,7 @@ export function openUnixPeerCalls(): UnixPeerCalls | undefined {
 }
 
 function bind(library: string): UnixPeerCalls {
+  const { dlopen, FFIType, ptr } = createRequire(import.meta.url)('bun:ffi') as typeof import('bun:ffi');
   const { i32, u32, u64, i64_fast, ptr: pointer } = FFIType;
   const libc = dlopen(library, {
     socket: { args: [i32, i32, i32], returns: i32 },

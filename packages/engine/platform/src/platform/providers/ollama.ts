@@ -85,7 +85,7 @@ export class OllamaProvider implements LLMProvider {
     this.capabilities = opts.capabilities;
     this.cacheCapability = opts.cacheCapability ?? getCacheCapability(opts.name);
     this.baseURL = opts.baseURL;
-    this.defaultModel = opts.defaultModel;
+    this.defaultModel = opts.defaultModel ?? opts.models?.[0] ?? '';
     this.nativeChatUrl = deriveOllamaChatUrl(opts.baseURL);
     this.nativeEmbedUrl = deriveOllamaEmbedUrl(opts.baseURL);
     this.nativeFetch = opts.nativeFetch ?? instrumentedFetch;

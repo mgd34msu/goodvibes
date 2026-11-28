@@ -1480,7 +1480,7 @@ What changes what:
 
 | Action | Changes |
 | --- | --- |
-| "make it the default" on a model, or "use its first model by default" on a provider, in Models and providers; `goodvibes models use <id>` / `goodvibes-agent models use <id>` | The shared default model, for every program. |
+| "make it the default" on a model, or "use its default model" on a provider (which picks that provider's highest benchmark-ranked text model from `models.dev`), in Models and providers; `goodvibes models use <id>` / `goodvibes-agent models use <id>` | The shared default model, for every program. |
 | "How hard the model thinks" and "When GoodVibes asks" in Settings | The shared default effort and mode, for every program. |
 | `/model use <id>`, picking a model in the model picker, `@model:<id>` in a prompt | This conversation's model only. |
 | "Choose how hard the model thinks" in This conversation; Shift+Tab | This conversation's effort or mode only. |

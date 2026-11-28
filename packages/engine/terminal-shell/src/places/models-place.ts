@@ -464,7 +464,7 @@ export const MODELS_PLACE = definePlace<Item>({
     { key: 'b', list: 'models', states: ['backup', 'backup-pinned'], capability: 'model.drop-backup', label: 'drop the backup', fill: { model: 'id' } },
     { key: 'o', list: 'models', capability: 'provider.pin-route', label: 'send every request here', fill: { model: 'id' } },
     // A provider.
-    { key: 'u', list: 'providers', states: [...USABLE_PROVIDER_STATES], capability: 'provider.use', label: 'use its first model by default', fill: { provider: 'id' } },
+    { key: 'u', list: 'providers', states: [...USABLE_PROVIDER_STATES], capability: 'provider.use', label: 'use its default model', fill: { provider: 'id' } },
     { key: 's', list: 'providers', states: ['key-can-sign-in', 'can-sign-in', 'expired', 'expiring'], capability: 'provider.sign-in', label: 'sign in', fill: { provider: 'id' } },
     { key: 'f', list: 'providers', states: ['waiting'], capability: 'provider.finish', label: 'finish signing in', fill: { provider: 'id' } },
     { key: 'o', list: 'providers', states: ['signed-in', 'expired', 'expiring'], capability: 'provider.sign-out', label: 'sign out', fill: { provider: 'id' } },

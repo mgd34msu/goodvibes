@@ -1,4 +1,5 @@
 import { documentedMaxOutput } from './anthropic-output-caps.js';
+import { resolveProviderDefaultModel } from './provider-default-model.js';
 import { revalidateProviderAttempt } from './attempt-guard.js';
 import type { MessageStreamEvent } from '@anthropic-ai/sdk/resources/messages';
 import type {
@@ -75,7 +76,10 @@ export interface AnthropicMessagesProviderAuthConfig {
 export interface AnthropicMessagesProviderOptions {
   readonly name: string;
   readonly label: string;
-  readonly defaultModel: string;
+  /** Optional explicit default model; omitted by built-in providers so defaults resolve programmatically from models.dev. */
+  readonly defaultModel?: string | undefined;
+  /** Optional custom resolver overriding the standard `resolveProviderDefaultModel` lookup. */
+  readonly resolveDefaultModel?: ((models: readonly string[]) => string | undefined) | undefined;
   readonly models: readonly string[];
   /**
    * Build the vendor client for one request.
@@ -111,9 +115,29 @@ export class AnthropicMessagesProvider implements LLMProvider {
     this.models = [...options.models];
   }
 
-  /** The configured default when the current list has it, otherwise the list's first model. */
-  get defaultModel(): string {
-    return this.models.includes(this.options.defaultModel) ? this.options.defaultModel : (this.models[0] ?? this.options.defaultModel);
+  /**
+   * Programmatic default model: custom resolver when provided, else explicit
+   * default if still offered, else highest benchmark-ranked model from
+   * `models.dev` (restricted to live-discovered models when present).
+   */
+  get defaultModel(): string | undefined {
+    if (this.options.resolveDefaultModel) {
+      return this.options.resolveDefaultModel(this.models);
+    }
+    const configured = this.options.defaultModel?.trim() || undefined;
+    if (configured && (this.models.length === 0 || this.models.includes(configured))) {
+      return configured;
+    }
+    return resolveProviderDefaultModel(this.name, { availableModels: this.models }) ?? this.models[0] ?? configured;
+  }
+
+  private resolveChatModel(requested: string | undefined): string {
+    const resolved = requested?.trim() || this.defaultModel;
+    if (resolved) return normalizeAnthropicModel(resolved);
+    throw new ProviderError(
+      `Provider "${this.name}" has no default model available yet (no model was specified and neither live discovery nor the models.dev catalog lists any models for it). Specify a model or refresh model lists.`,
+      { category: 'config', provider: this.name, operation: 'chat', phase: 'request' },
+    );
   }
 
   /** The id sent on the wire for a model the list shows; a provider whose ids differ maps it here. */
@@ -123,9 +147,9 @@ export class AnthropicMessagesProvider implements LLMProvider {
 
   async chat(params: ChatRequest): Promise<ChatResponse> {
     const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
+    const resolvedModel = this.resolveChatModel(params.model);
     // Instrumented like every other adapter: the call is metered and its outcome feeds provider health.
     return (await instrumentedLlmCall(() => withRetry(async () => {
-      const resolvedModel = normalizeAnthropicModel(params.model ?? this.defaultModel);
       const body: Record<string, unknown> = {
         model: this.wireModelId(resolvedModel),
         max_tokens: params.maxTokens ?? documentedMaxOutput(resolvedModel),
@@ -236,7 +260,7 @@ export class AnthropicMessagesProvider implements LLMProvider {
         });
       }
     }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, params.onRetry),
-    { provider: this.name, model: params.model ?? this.defaultModel })).result;
+    { provider: this.name, model: resolvedModel })).result;
   }
 
   async describeRuntime(deps: ProviderRuntimeMetadataDeps): Promise<ProviderRuntimeMetadata> {
@@ -263,7 +287,7 @@ export class AnthropicMessagesProvider implements LLMProvider {
         routes: authRoutes,
       },
       models: {
-        defaultModel: this.defaultModel,
+        ...(this.defaultModel ? { defaultModel: this.defaultModel } : {}),
         models: this.models,
       },
       usage: {

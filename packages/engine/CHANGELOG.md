@@ -43,6 +43,10 @@ The full write-up is in
 - Compacted generated `operator-contract.ts` emission to eliminate multi-GB
   TypeScript compiler heap usage, and replaced fragile prose/table/snapshot
   checks with real contract and behavior tests.
+- Replaced hardcoded built-in provider `defaultModel` literals with
+  programmatic default resolution backed by `models.dev` benchmark rankings
+  (and live-discovered model lists), refreshing automatically whenever the
+  `models.dev` catalog or provider listings update.
 
 ### Fixed
 

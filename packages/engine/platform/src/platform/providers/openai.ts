@@ -43,6 +43,7 @@ import type { CacheHitTracker } from './cache-strategy.js';
 import { extractOpenAIStreamTextDelta } from './openai-stream-delta.js';
 import { normalizeError, summarizeError, toProviderError } from '../utils/error-display.js';
 import { resolveOpenAIClientApiKey } from './openai-compat.js';
+import { resolveProviderDefaultModel } from './provider-default-model.js';
 import { resolveEffortForRequest, resolveReasoningEffortSpec } from './reasoning-effort-families.js';
 import { reasoningEffortLevels } from './reasoning-effort.js';
 import { fetchOpenAISubscriptionModelIds, OpenAISubscriptionRoute, subscriptionAccountKey, type OpenAISubscriptionStore } from './openai-codex.js';
@@ -573,6 +574,7 @@ export class OpenAIProvider implements LLMProvider {
         : 'Not signed in: sign in with a ChatGPT subscription in Models and providers, or store OPENAI_API_KEY there.',
     }, authRoutes);
     const active = this.activeSignInRoute();
+    const defaultModel = resolveProviderDefaultModel(this.name, { availableModels: this.models });
     return {
       auth: {
         mode: this.subscriptionConfigured() ? 'oauth' : 'api-key',
@@ -582,6 +584,7 @@ export class OpenAIProvider implements LLMProvider {
         routes: authRoutes,
       },
       models: {
+        ...(defaultModel ? { defaultModel } : {}),
         models: this.models,
         embeddingModel: this.embeddingModel,
       },
@@ -604,7 +607,7 @@ export class OpenAIProvider implements LLMProvider {
         local: false,
         streamProtocol: active === 'subscription' ? 'openai-codex-responses-sse' : 'openai-chat-completions',
         reasoningMode: active === 'subscription' ? 'responses-reasoning' : 'reasoning_effort',
-        ...(active === 'subscription' ? { supportedReasoningEfforts: reasoningEffortLevels(resolveReasoningEffortSpec({ provider: this.name, modelId: this.models[0] ?? '' })) } : {}),
+        ...(active === 'subscription' ? { supportedReasoningEfforts: reasoningEffortLevels(resolveReasoningEffortSpec({ provider: this.name, modelId: defaultModel ?? this.models[0] ?? '' })) } : {}),
         cacheStrategy: active === 'subscription' ? 'subscription-session-cache-key' : 'implicit-openai-cache-observation',
         notes: [
           `Sign-in order: ${order.length ? order.map((route) => OPENAI_SIGN_IN_ROUTE_LABELS[route]).join(' → ') : 'none set up'}.`,

@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.6.6] - 2026-11-28
+
+The full write-up is in
+[docs/releases/3.6.6.md](https://github.com/mgd34msu/goodvibes/blob/v3.6.6/docs/releases/3.6.6.md).
+
+### Fixed
+
+- **Prevent planner deadlock on immutable native root criteria:** Gated
+  `readCriterionShapes` (`criterion-shape`) on `checkRootMeaning` alongside
+  `checkTrace` and `checkCoverage` in `platform/contract/plan-checks.ts`.
+  Immutable `nativeSource` / fixed `originalSource` root criteria cannot be
+  restated by the planner, so rejecting them as `not-checkable` deadlocked
+  every repair attempt against `checkNativeSourcePlan` until Work failed.
+  Unit-level derived criteria and root coverage continue to be checked by
+  `unit-shape`.
+
 ## [3.6.5] - 2026-11-28
 
 The full write-up is in

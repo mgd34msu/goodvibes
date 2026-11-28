@@ -415,10 +415,14 @@ async function runPlanChecksWithModel(plan: ContractPlan, ask: string, shape: Re
   const port = concurrencyLimited(owner.port, PLAN_CHECK_CONCURRENCY);
   const derived = hasDerivedAcceptanceChecks(options.originalSource);
   const checkRootMeaning = options.nativeSource === undefined && (options.originalSource === undefined || derived);
+  const emptyShapes = (): CheckOutput & { readonly dispositions: Map<string, CriterionDispositionRuling> } => ({ ...emptyOutput(), dispositions: new Map<string, CriterionDispositionRuling>() });
   const [trace, coverage, shapes, units, continuation] = await Promise.all([
     checkRootMeaning ? checkTrace(port, plan, ask, options) : emptyOutput(),
     checkRootMeaning ? checkCoverage(port, plan, ask, options) : emptyOutput(),
-    readCriterionShapes(port, plan, ask, shape, options),
+    // Immutable native/original root criteria cannot be restated by the planner;
+    // reporting `not-checkable` on them deadlocks against checkNativeSourcePlan.
+    // Derived unit criteria and coverage of those roots are still checked by checkUnits.
+    checkRootMeaning ? readCriterionShapes(port, plan, ask, shape, options) : emptyShapes(),
     checkUnits(port, plan, options),
     checkRepairContinuation(port, plan, ask, options),
   ]);
@@ -429,8 +433,7 @@ async function runPlanChecksWithModel(plan: ContractPlan, ask: string, shape: Re
   }
   const outputs = [trace, coverage, shapes, units];
   const reports = [
-    ...(checkRootMeaning ? [report('criterion-trace', trace), report('plan-coverage', coverage)] : []),
-    report('criterion-shape', shapes),
+    ...(checkRootMeaning ? [report('criterion-trace', trace), report('plan-coverage', coverage), report('criterion-shape', shapes)] : []),
     report('unit-shape', units),
   ];
   return {

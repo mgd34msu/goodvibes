@@ -62,7 +62,7 @@ export { evaluateDaemonStatusCompatibility };
  * The oldest daemon build this Agent will work against, or undefined for "this
  * client is not asking for anything". See the note above before changing it.
  */
-export const AGENT_DAEMON_BUILD_FLOOR: string | undefined = '3.3.2';
+export const AGENT_DAEMON_BUILD_FLOOR: string | undefined = '3.6.0';
 
 export interface DaemonBuildGuardOptions {
   /** The floor this client declares. Undefined means it declares none. */

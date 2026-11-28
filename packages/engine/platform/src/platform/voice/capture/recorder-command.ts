@@ -113,6 +113,8 @@ export function buildRecorderCommand(
           '--rate', rate,
           '--channels', channels,
           '--format', 's16',
+          // Match the 80 ms wake-frame cadence so chunks arrive smoothly rather than bursting.
+          '--latency', '80ms',
           // Without this the stream carries a container header. See the header note.
           '--container', 'raw',
           ...(device.length > 0 ? ['--target', device] : []),
@@ -128,6 +130,10 @@ export function buildRecorderCommand(
           `--rate=${rate}`,
           `--channels=${channels}`,
           '--format=s16le',
+          // PulseAudio/PipeWire-Pulse defaults to a 2000 ms capture buffer (25 x 80 ms frames
+          // flushed at once), which overflows the wake queue and drops 80% of audio. Request
+          // 80 ms latency so frames arrive one-by-one in real time.
+          '--latency-msec=80',
           ...(device.length > 0 ? [`--device=${device}`] : []),
         ],
       };

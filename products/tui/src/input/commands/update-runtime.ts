@@ -1,6 +1,6 @@
 import { DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '@goodvibes/engine/platform/platform/runtime/client';
 import { applySuiteUpdate, installedSuiteNeedsRepair, type SuiteUpdateResult } from '@goodvibes/engine/platform/platform/runtime/self-update';
-import { createSelfUpdateCommand, daemonRestartFooter, retainSuiteUpdateConfiguration, formatSuiteUpdateReport, type RunCommand } from '@goodvibes/engine/terminal-shell/release-update-preflight';
+import { createSelfUpdateCommand, restartDaemonAfterSuiteUpdate, retainSuiteUpdateConfiguration, formatSuiteUpdateReport, type RunCommand, type SuiteDaemonRestarter } from '@goodvibes/engine/terminal-shell/release-update-preflight';
 import {
   checkReleaseUpdate,
   prepareReleaseUpdate,
@@ -76,6 +76,8 @@ export interface ApplyUpdateOptions {
   readonly print: (line: string) => void;
   readonly configManager: CliServiceNameSource;
   readonly runCommand?: RunCommand;
+  /** Injectable daemon service restarter for tests; defaults to restarting the running service on real disk swaps. */
+  readonly restartDaemon?: SuiteDaemonRestarter | undefined;
   /** Injectable filesystem seam (the platform's UpdateFileIo) so tests observe swaps in memory. */
   readonly io?: UpdateFileIo;
   /**
@@ -92,6 +94,7 @@ export interface ApplyUpdateOptions {
 /** Prepare the selected release and apply the platform's complete installed
  * suite. Progress distinguishes clean refusal from committed/recovery state. */
 export async function applyUpdate(options: ApplyUpdateOptions): Promise<SuiteUpdateResult | undefined> {
+  const realDiskSwap = options.io === undefined;
   options = {
     ...options,
     io: captureUpdateFileIo(options.io ?? realUpdateFileIo),
@@ -133,7 +136,13 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<SuiteUpd
       beforeCommit: () => { if (progress) progress.begun = true; },
     });
     if (progress) { progress.begun = true; progress.committed = true; }
-    options.print(formatSuiteUpdateReport(result, 'updated', await daemonRestartFooter(result, options.platform, options.configManager, options.runCommand)));
+    options.print(formatSuiteUpdateReport(result, 'updated', await restartDaemonAfterSuiteUpdate(result, {
+      platform: options.platform,
+      configManager: options.configManager,
+      runCommand: options.runCommand,
+      restartDaemon: options.restartDaemon,
+      attemptRestart: realDiskSwap && options.runCommand === undefined,
+    })));
     return result;
   } catch (error) {
     recordSwapFailure(progress, error);

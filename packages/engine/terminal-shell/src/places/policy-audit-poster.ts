@@ -36,6 +36,7 @@ export function postDecidedCallsToDaemon(options: PolicyAuditPosterOptions): () 
   let waiting: PermissionAuditEntry[] = [];
   let sending = false;
   let stopped = false;
+  let lastLoggedError: string | undefined;
 
   const send = async (): Promise<void> => {
     if (sending || stopped || waiting.length === 0) return;
@@ -46,9 +47,14 @@ export function postDecidedCallsToDaemon(options: PolicyAuditPosterOptions): () 
       await options.invoke('permissions.audit.post', { program: options.program, calls });
       const sent = new Set(batch);
       waiting = waiting.filter((call) => !sent.has(call));
+      lastLoggedError = undefined;
     } catch (error) {
       // Kept for the next post, or for when the daemon is back.
-      logger.debug('decided calls not posted to the daemon yet', { waiting: waiting.length, error: summarizeError(error) });
+      const detail = summarizeError(error);
+      if (detail !== lastLoggedError) {
+        lastLoggedError = detail;
+        logger.debug('decided calls not posted to the daemon yet', { waiting: waiting.length, error: detail });
+      }
       sending = false;
       return;
     }

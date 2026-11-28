@@ -19,6 +19,7 @@ import { fetchWithTimeout, instrumentedFetch } from '../utils/fetch-with-timeout
 import { toolCallArgumentFields } from './tool-formats.js';
 import { SseLineBuffer } from './sse-line-buffer.js';
 import { listingHttpError } from './live-model-discovery.js';
+import { VERSION as PLATFORM_VERSION } from '../version.js';
 
 /**
  * The subscription route of the `openai` provider: a ChatGPT plan signed in
@@ -33,16 +34,21 @@ const MODEL_LIST_TIMEOUT_MS = 15_000;
 
 /**
  * The models the signed-in plan serves, from the backend's own model list
- * (GET /codex/models, the list Codex clients read). Entries are read by their
- * `slug`, else `id`; the ids are the same as the API's, so no name is mapped.
+ * (GET /codex/models?client_version=..., the list Codex clients read). Entries
+ * are read by their `slug`, else `id`; the ids are the same as the API's, so
+ * no name is mapped. `PLATFORM_VERSION` is sent as `client_version` because the
+ * backend rejects requests without a SemVer `client_version` (HTTP 400) and
+ * filters newer models out for old versions.
  */
 export async function fetchOpenAISubscriptionModelIds(accessToken: string): Promise<string[]> {
   const accountId = extractAccountId(accessToken);
-  const res = await fetchWithTimeout(`${OPENAI_CODEX_BASE_URL}/codex/models`, {
+  const url = `${OPENAI_CODEX_BASE_URL}/codex/models?client_version=${encodeURIComponent(PLATFORM_VERSION)}`;
+  const res = await fetchWithTimeout(url, {
     headers: {
       authorization: `Bearer ${accessToken}`,
       'chatgpt-account-id': accountId,
       originator: 'pi',
+      'OpenAI-Beta': 'responses=experimental',
       accept: 'application/json',
       'User-Agent': getOpenAICodexUserAgent(),
     },

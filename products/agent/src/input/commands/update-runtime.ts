@@ -4,8 +4,8 @@ import { installedSuiteNeedsRepair, applySuiteUpdate, captureUpdateFileIo, realU
 import { DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '@goodvibes/engine/platform/platform/runtime/client';
 import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { checkReleaseUpdate, prepareReleaseUpdate, createSelfUpdateCommand,
-  retainSuiteUpdateConfiguration, formatSuiteUpdateReport, daemonRestartFooter,
-  type DaemonServiceNameSource, type ReleaseUpdateCheck, type RunCommand, type SuiteUpdateConfigurationSource,
+  retainSuiteUpdateConfiguration, formatSuiteUpdateReport, restartDaemonAfterSuiteUpdate,
+  type DaemonServiceNameSource, type ReleaseUpdateCheck, type RunCommand, type SuiteDaemonRestarter, type SuiteUpdateConfigurationSource,
 } from '@goodvibes/engine/terminal-shell/release-update-preflight';
 import { recordSwapFailure, type UpdateSwapProgress } from '@goodvibes/engine/terminal-shell/launch-auto-update';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
@@ -34,6 +34,8 @@ export interface ApplyUpdateOptions {
   readonly configManager?: (SuiteUpdateConfigurationSource & DaemonServiceNameSource) | undefined;
   /** Asks the service manager whether the daemon runs as a service; injectable so tests never run systemctl. */
   readonly runCommand?: RunCommand | undefined;
+  /** Injectable daemon service restarter for tests; defaults to restarting the running service on real disk swaps. */
+  readonly restartDaemon?: SuiteDaemonRestarter | undefined;
   readonly signal?: AbortSignal | undefined;
   /** Original runtime/idle ownership, rechecked by the shared updater before effects. */
   readonly assertCurrent?: (() => void) | undefined;
@@ -46,6 +48,7 @@ function assertOwner(check: (() => void) | undefined): void {
 /** All installed products/native companions/directories are prepared before
  * replacement. The platform owns compensation and version-bound rollback. */
 export async function applyUpdate(options: ApplyUpdateOptions): Promise<SuiteUpdateResult | undefined> {
+  const realDiskSwap = options.io === undefined;
   options = { ...options, io: captureUpdateFileIo(options.io ?? realUpdateFileIo) };
   const selected = retainSuiteUpdateConfiguration(options.configManager);
   const progress = options.progress;
@@ -71,7 +74,13 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<SuiteUpd
       beforeCommit: () => { if (progress) progress.begun = true; },
     });
     if (progress) { progress.begun = true; progress.committed = true; }
-    options.print(formatSuiteUpdateReport(result, 'updated', await daemonRestartFooter(result, options.platform, options.configManager ?? {}, options.runCommand)));
+    options.print(formatSuiteUpdateReport(result, 'updated', await restartDaemonAfterSuiteUpdate(result, {
+      platform: options.platform,
+      configManager: options.configManager ?? {},
+      runCommand: options.runCommand,
+      restartDaemon: options.restartDaemon,
+      attemptRestart: realDiskSwap && options.runCommand === undefined,
+    })));
     return result;
   } catch (error) {
     recordSwapFailure(progress, error);

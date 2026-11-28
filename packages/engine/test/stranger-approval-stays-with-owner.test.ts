@@ -85,6 +85,7 @@ test('a stranger\'s held message and a group only the owner wrote in put the own
       const asked = daemon.approvalBroker.requestApproval({ sessionId, request: { callId, tool: 'exec', args: { command: 'ls' }, category: 'execute',
         analysis: { classification: 'execute', riskLevel: 'medium', summary: 'List the garden folder', reasons: [] } } });
       const id = await raised;
+      await routing.settle();
       await daemon.approvalBroker.resolveApproval(id, { approved, actor: 'owner', expectedRevision: daemon.approvalBroker.listApprovals(50).find((entry) => entry.id === id)!.revision });
       await asked;
       await routing.settle();

@@ -1,5 +1,36 @@
 # Changelog
 
+## [3.6.1] - 2026-11-27
+
+The full write-up is in
+[docs/releases/3.6.1.md](https://github.com/mgd34msu/goodvibes/blob/v3.6.1/docs/releases/3.6.1.md).
+
+### Fixed
+
+- **Managed daemon restart after suite updates:** Terminal app and Agent suite
+  updates (`applyUpdate` / launch auto-update) now restart the running managed
+  `goodvibes-daemon` service when `goodvibes-daemon` is replaced on disk,
+  preventing an immediate version-skew mismatch against the outgoing daemon
+  process.
+- **Incompatible daemon handling & auto-reprobe in the terminal app:** Wired
+  process-wide daemon refusal across `operator-endpoint` and
+  `connected-host-client` when the daemon on the configured port is an
+  incompatible version, raised both terminal build floors to `3.6.0`, surfaced
+  the mismatch and restart command cleanly on delegated work (instead of
+  `Unknown gateway method` or `auth_required`), deduplicated repeated poster
+  errors, and armed automatic reprobe so restarting `goodvibes-daemon` heals
+  the running terminal session.
+- **OpenAI subscription live model discovery:** Added the required
+  `client_version` query parameter (using the platform SemVer version) and
+  `OpenAI-Beta` header to `GET /backend-api/codex/models`, fixing `400 Bad
+  Request` failures on `openai@subscription` discovery.
+- **Voice wake capture buffering & drop-report throttle:** Added 80 ms capture
+  latency flags (`--latency-msec=80` for `parecord`, `--latency 80ms` for
+  `pw-record`) so microphone audio arrives frame-by-frame instead of 2-second
+  bursts that overflowed the wake queue, increased queue headroom, and fixed
+  `WakeListener` so drop summaries honor the 30-second report interval across
+  bursts.
+
 ## [3.6.0] - 2026-11-27
 
 The full write-up is in

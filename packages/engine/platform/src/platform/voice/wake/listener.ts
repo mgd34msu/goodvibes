@@ -91,7 +91,7 @@ export type {
  * is genuinely wrong (a host under heavy load, a stalled runtime). Dropping and
  * saying so beats growing a queue that turns into latency and then memory.
  */
-const MAX_QUEUED_FRAMES = 4;
+const MAX_QUEUED_FRAMES = 8;
 
 /**
  * How long scoring one frame may take before inference counts as hung and the
@@ -160,7 +160,7 @@ export class WakeListener {
   /** When the current run of drops began, for the summary's window. */
   #dropBurstStartedAt: number | null = null;
   /** When a drop was last reported, so repeats stay on an interval. */
-  #lastDropReportAt = 0;
+  #lastDropReportAt: number | null = null;
   /** What the device pin last resolved to, and why. */
   #deviceBinding: AudioInputBinding | null = null;
   /** Armed only while on a fallback, looking for the pin to return. */
@@ -751,7 +751,9 @@ export class WakeListener {
       this.#noteDroppedFrame();
       return;
     }
-    if (this.#droppedSinceReport > 0) this.#reportDroppedFrames();
+    if (this.#droppedSinceReport > 0 && this.#lastDropReportAt !== null && arrivedAt - this.#lastDropReportAt >= DROPPED_FRAME_REPORT_INTERVAL_MS) {
+      this.#reportDroppedFrames();
+    }
     this.#queued += 1;
     const generation = this.#captureGeneration;
     const engine = this.#engine;
@@ -798,15 +800,19 @@ export class WakeListener {
     this.#droppedSinceReport += 1;
     if (this.#dropBurstStartedAt === null) {
       this.#dropBurstStartedAt = at;
-      this.#lastDropReportAt = at;
-      this.#options.warn?.('wake detection is behind real time; dropping frames until it catches up', {
-        queued: this.#queued,
-      });
-      // The line above IS the report for this frame.
-      this.#droppedSinceReport = 0;
-      return;
+      if (this.#lastDropReportAt === null || at - this.#lastDropReportAt >= DROPPED_FRAME_REPORT_INTERVAL_MS) {
+        this.#lastDropReportAt = at;
+        this.#options.warn?.('wake detection is behind real time; dropping frames until it catches up', {
+          queued: this.#queued,
+        });
+        // The line above IS the report for this frame.
+        this.#droppedSinceReport = 0;
+        return;
+      }
     }
-    if (at - this.#lastDropReportAt >= DROPPED_FRAME_REPORT_INTERVAL_MS) this.#reportDroppedFrames();
+    if (this.#lastDropReportAt !== null && at - this.#lastDropReportAt >= DROPPED_FRAME_REPORT_INTERVAL_MS) {
+      this.#reportDroppedFrames();
+    }
   }
 
   /** Write the counted summary for a run of drops, then reset the run. */

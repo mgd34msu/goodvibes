@@ -54,6 +54,7 @@ function startHookRunsPoster(options: HookRunsPosterOptions): { readonly stop: (
   let waiting: HookTraceRecord[] = [];
   let inFlight: Promise<boolean> | undefined;
   let stopped = false;
+  let lastLoggedError: string | undefined;
 
   /** One post of the oldest waiting runs; true when it was taken. */
   const postOnce = async (): Promise<boolean> => {
@@ -64,10 +65,15 @@ function startHookRunsPoster(options: HookRunsPosterOptions): { readonly stop: (
       await options.invoke('hooks.trace.post', { program: options.program, ...(project ? { project } : {}), runs });
       const sent = new Set(batch.map((run) => run.id));
       waiting = waiting.filter((run) => !sent.has(run.id));
+      lastLoggedError = undefined;
       return true;
     } catch (error) {
       // Kept for the next post, or for when the daemon is back.
-      logger.debug('hook runs not posted to the daemon yet', { waiting: waiting.length, error: summarizeError(error) });
+      const detail = summarizeError(error);
+      if (detail !== lastLoggedError) {
+        lastLoggedError = detail;
+        logger.debug('hook runs not posted to the daemon yet', { waiting: waiting.length, error: detail });
+      }
       return false;
     }
   };

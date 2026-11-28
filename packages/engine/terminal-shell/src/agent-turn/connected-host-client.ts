@@ -368,7 +368,7 @@ export function resolveConnectedHost(selection: ConnectedHostSelection): Connect
   if (tooOld) {
     return {
       baseUrl, token: null, credential: 'the daemon build check',
-      unavailable: { code: 'host_too_old', reason: tooOld, next: ['update GoodVibes on the host (goodvibes-daemon) to this Agent\'s version, then retry'] },
+      unavailable: { code: 'host_too_old', reason: tooOld, next: ['restart or update GoodVibes on the host (goodvibes-daemon restart-service), then retry'] },
     };
   }
   const homeDirectory = typeof selection.homeDirectory === 'function' ? selection.homeDirectory() : selection.homeDirectory;

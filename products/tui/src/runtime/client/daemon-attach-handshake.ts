@@ -35,6 +35,18 @@ import type { HostServiceStatus } from '@/runtime/index.ts';
 import { readExternalDaemonAttach } from '../daemon-attach-notices.ts';
 import { ClientBuildGuard, DaemonBuildFloor } from './build-floors.ts';
 
+function isCompatibleDaemonBand(localVersion: string, remoteVersion: string | undefined): boolean {
+  const parse = (raw: string | undefined): [number, number] | null => {
+    if (!raw) return null;
+    const match = /^v?(\d+)\.(\d+)\./i.exec(raw.trim());
+    return match ? [Number(match[1]), Number(match[2])] : null;
+  };
+  const local = parse(localVersion);
+  const remote = parse(remoteVersion);
+  if (!local || !remote) return false;
+  return remote[0] === local[0] && remote[1] >= local[1];
+}
+
 export interface DaemonAttachHandshakeDeps {
   /** The forward floor's latch, fed the floor this daemon announces. */
   readonly clientBuildGuard: ClientBuildGuard;
@@ -53,6 +65,8 @@ export interface DaemonAttachHandshakeDeps {
   readonly notify: (text: string) => void;
   /** This terminal's own floor on the daemon; defaults to the shipped one. */
   readonly daemonFloor?: string | undefined;
+  /** This terminal's own SemVer version, checked against the daemon on reprobe after a boot-time incompatibility. */
+  readonly localVersion?: string | undefined;
   /** Injectable `/status` read for tests. */
   readonly read?: typeof readExternalDaemonAttach | undefined;
   /**
@@ -97,6 +111,7 @@ export function createDaemonAttachHandshake(deps: DaemonAttachHandshakeDeps): Da
   // permanent: the status it left behind is no longer `external`, so a daemon
   // that updated and came back would never be read again.
   let refusal: { readonly before: HostServiceStatus; readonly marked: HostServiceStatus } | null = null;
+  let notifiedIncompatibleKey: string | null = null;
   // The forward floor's one line. The guard latches in the services graph,
   // where the continuation runner reads it; this is the surface that tells the
   // owner, and a verdict reached before now is held and delivered here.
@@ -140,6 +155,18 @@ export function createDaemonAttachHandshake(deps: DaemonAttachHandshakeDeps): Da
         : null;
       if (reprobing) daemonStatus = reprobing.before;
       else refusal = null;
+      // Boot-time version skew (bootstrap-services.ts) marks mode 'incompatible' before attach runs:
+      // surface the refusal notice once and arm reprobe so restarting the daemon heals this session.
+      if (!reprobing && daemonStatus.mode === 'incompatible' && daemonStatus.baseUrl) {
+        const key = `${daemonStatus.baseUrl}|${daemonStatus.reason ?? ''}`;
+        if (daemonStatus.reason && notifiedIncompatibleKey !== key) {
+          notifiedIncompatibleKey = key;
+          deps.notify(daemonStatus.reason);
+        }
+        refusal = { before: { ...daemonStatus, mode: 'external' }, marked: daemonStatus };
+        deps.adopt(daemonStatus, daemonToken);
+        return;
+      }
       if (daemonStatus.mode !== 'external' || !daemonStatus.baseUrl) {
         deps.adopt(daemonStatus, daemonToken);
         return;
@@ -159,6 +186,20 @@ export function createDaemonAttachHandshake(deps: DaemonAttachHandshakeDeps): Da
         return;
       }
       const verdict = daemonBuildFloor.evaluate(answer.statusPayload, daemonStatus.baseUrl);
+      const remoteVersion = typeof (answer.statusPayload as { version?: unknown } | null)?.version === 'string'
+        ? (answer.statusPayload as { version: string }).version
+        : undefined;
+      const versionSkewed = deps.localVersion !== undefined
+        && !isCompatibleDaemonBand(deps.localVersion, remoteVersion);
+      if (versionSkewed) {
+        const reason = reprobing?.marked.reason
+          ?? `A GoodVibes daemon (version ${remoteVersion ?? 'unknown'}) is running on ${daemonStatus.baseUrl}, but this program is version ${deps.localVersion}. Restart it with goodvibes-daemon restart-service.`;
+        const refused: HostServiceStatus = { ...daemonStatus, mode: 'incompatible', reason };
+        refusal = { before: daemonStatus, marked: refused };
+        deps.recordRefusal(refused);
+        deps.adopt(refused, daemonToken);
+        return;
+      }
       const notice = daemonBuildFloor.noticeFor(verdict);
       if (notice) deps.notify(notice);
       // The read acknowledged these receipts at the daemon, so this is the only
@@ -174,7 +215,8 @@ export function createDaemonAttachHandshake(deps: DaemonAttachHandshakeDeps): Da
         return;
       }
       refusal = null;
-      if (reprobing) deps.recordRefusal(daemonStatus);
+      notifiedIncompatibleKey = null;
+      if (reprobing) deps.recordRefusal({ ...daemonStatus, ...(remoteVersion ? { version: remoteVersion } : {}), reason: 'Existing GoodVibes daemon verified on configured host/port' });
       deps.clientBuildGuard.observeFloor(answer.clientFloor);
       deps.adopt(daemonStatus, daemonToken);
     }

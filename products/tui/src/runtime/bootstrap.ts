@@ -83,6 +83,9 @@ import {
   type DaemonServiceControl,
 } from '@goodvibes/engine/platform/platform/runtime/client';
 import { createDaemonAttachHandshake } from './client/daemon-attach-handshake.ts';
+import { useTuiDaemonRefusal } from './client/operator-endpoint.ts';
+import { useConnectedHostRefusal } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
+import { VERSION } from '../version.ts';
 import { createPendingServiceStatus, hostServiceIsActive, hostServiceIsBlocked } from './client/host-service-status.ts';
 import { createRelayReadAccessors } from './relay-reachability-bridge.ts';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
@@ -591,6 +594,12 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
 
   let externalServices: ExternalServicesHandle = createPendingHostServices((name) => createPendingServiceStatus(configManager, name));
   let externalServicesPromise: Promise<ExternalServicesHandle> | null = null;
+  const incompatibleDaemonRefusal = (): string | undefined =>
+    externalServices.daemonStatus.mode === 'incompatible'
+      ? (externalServices.daemonStatus.reason ?? 'The running GoodVibes daemon is an incompatible version. Restart it with goodvibes-daemon restart-service.')
+      : undefined;
+  bootstrapUnsubs.push(useConnectedHostRefusal(incompatibleDaemonRefusal));
+  bootstrapUnsubs.push(useTuiDaemonRefusal(incompatibleDaemonRefusal));
   const platformExternalServices = uiServices.platform as typeof uiServices.platform & {
     externalServices: NonNullable<typeof uiServices.platform.externalServices>;
   };
@@ -621,6 +630,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // receipts off one /status read, see client/daemon-attach-handshake.ts.
   const daemonHandshake = createDaemonAttachHandshake({
     clientBuildGuard: services.clientBuildGuard,
+    localVersion: VERSION,
     readDaemonStatus: () => externalServices.daemonStatus,
     recordRefusal: (status) => {
       externalServices = { ...externalServices, daemonStatus: status };

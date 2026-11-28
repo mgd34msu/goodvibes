@@ -80,7 +80,13 @@ export function createDaemonWorkDelegation(options: DaemonWorkDelegationOptions)
    */
   async function ask(id: string, inputs: Record<string, string>, extra: Record<string, string> = {}): Promise<{ readonly ok: true; readonly text: string; readonly data: Answer } | { readonly ok: false; readonly error: string }> {
     const connection = captureOperatorConnection(options.shellPaths, options.configManager, () => {});
-    if (!connection.token) return { ok: false, error: `auth_required: ${connection.unavailable?.reason ?? 'no daemon credential was found'}; nothing was sent.` };
+    if (!connection.token) {
+      if (connection.unavailable?.code === 'host_too_old') {
+        const next = connection.unavailable.next[0];
+        return { ok: false, error: next && !connection.unavailable.reason.includes(next) ? `${connection.unavailable.reason} ${next}` : connection.unavailable.reason };
+      }
+      return { ok: false, error: `auth_required: ${connection.unavailable?.reason ?? 'no daemon credential was found'}; nothing was sent.` };
+    }
     connection.assertCurrent();
     let response: Response;
     try {

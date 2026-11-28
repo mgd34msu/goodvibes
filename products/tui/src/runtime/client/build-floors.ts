@@ -58,7 +58,7 @@ import type { ClientCompatibilityVerdict, DaemonCompatibilityVerdict } from '@go
  * release notes what it was raised for. It costs a daemon update for anyone
  * running an older one.
  */
-export const TUI_DAEMON_BUILD_FLOOR = '3.3.2';
+export const TUI_DAEMON_BUILD_FLOOR = '3.6.0';
 
 export interface ClientBuildGuardOptions {
   readonly clientVersion: string;

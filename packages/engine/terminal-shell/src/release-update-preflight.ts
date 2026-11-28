@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { PREVIOUS_FILE_SUFFIX } from '@goodvibes/engine/platform/platform/runtime/self-update';
+import { restartHandedOverDaemon, type DaemonRestartOutcome } from '@goodvibes/engine/platform/platform/runtime/client';
 import { describeDaemonUpdates, type DaemonUpdateVerbs } from './daemon-update-status.js';
 import { daemonCapabilityAction, runDaemonCapability, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
 import {
@@ -243,6 +244,46 @@ export async function daemonRestartFooter(
   if (!result.programs.includes('goodvibes-daemon')) return [];
   const service = await detectDaemonServiceManaged(platform, configManager, runCommand);
   return service.managed ? [`Daemon restart: ${service.restartCommand}`] : [];
+}
+
+/** Injectable daemon restart seam after a suite update replaces goodvibes-daemon. */
+export type SuiteDaemonRestarter = (
+  configManager: { get(key: string): unknown },
+) => DaemonRestartOutcome;
+
+/**
+ * Restart the running managed daemon service when a suite update replaced
+ * `goodvibes-daemon` on disk, so a relaunched terminal app does not immediately
+ * talk to a stale daemon process from the previous minor release.
+ *
+ * Only runs a real service restart when `attemptRestart` is true (or a custom
+ * `restartDaemon` seam was injected); in-memory / `runCommand` test runs keep
+ * the non-mutating footer check so tests never touch the host's service manager.
+ */
+export async function restartDaemonAfterSuiteUpdate(
+  result: { readonly programs: readonly string[] },
+  options: {
+    readonly platform: NodeJS.Platform;
+    readonly configManager: DaemonServiceNameSource;
+    readonly runCommand?: RunCommand | undefined;
+    readonly restartDaemon?: SuiteDaemonRestarter | undefined;
+    readonly attemptRestart?: boolean | undefined;
+  },
+): Promise<readonly string[]> {
+  if (!result.programs.includes('goodvibes-daemon')) return [];
+  if (options.restartDaemon || options.attemptRestart) {
+    try {
+      const restarter = options.restartDaemon ?? ((reader) => restartHandedOverDaemon(reader));
+      const outcome = restarter({ get: (key) => options.configManager.get?.(key) });
+      return outcome.restarted
+        ? [`Daemon restarted: ${outcome.detail}.`]
+        : [`Daemon restart: ${outcome.detail}`];
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return [`Daemon restart failed (${detail}); run: goodvibes-daemon restart-service`];
+    }
+  }
+  return daemonRestartFooter(result, options.platform, options.configManager, options.runCommand);
 }
 /** Shared terminal report for the actual products/directories the suite changed. */
 export function formatSuiteUpdateReport(result: {

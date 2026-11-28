@@ -148,7 +148,22 @@ function endpointOf(resolution: DaemonTargetResolution): DaemonEndpoint {
  * (bounded by the check's timeout), so the first call after start succeeds or
  * fails for a real reason.
  */
+/** The refusal every daemon call of this terminal answers with while bootstrap holds an incompatible daemon. */
+let tuiDaemonRefusal: (() => string | undefined) | undefined;
+
+/**
+ * Make every daemon call of this terminal (`resolveDaemonEndpoint`, `resolveOperatorRpc`,
+ * `createDaemonVerbCaller`) refuse cleanly while `refusal()` reports an incompatible daemon,
+ * instead of dialing it and hitting `Unknown gateway method` errors. Returns the unregister function.
+ */
+export function useTuiDaemonRefusal(refusal: () => string | undefined): () => void {
+  tuiDaemonRefusal = refusal;
+  return () => { if (tuiDaemonRefusal === refusal) tuiDaemonRefusal = undefined; };
+}
+
 export async function resolveDaemonEndpoint(deps: EndpointDeps): Promise<DaemonEndpoint> {
+  const refused = tuiDaemonRefusal?.();
+  if (refused) return { available: false, reason: refused };
   try {
     return endpointOf(await resolveDaemonTargetProven(targetInput(deps)));
   } catch (error) {
@@ -172,6 +187,8 @@ export function resolveOperatorRpc(deps: {
   /** Injectable fetch for tests; defaults to the global fetch. */
   readonly fetch?: typeof fetch | undefined;
 }): OperatorRpc {
+  const refused = tuiDaemonRefusal?.();
+  if (refused) return { available: false, reason: refused };
   const input = targetInput(deps);
   let resolution: DaemonTargetResolution;
   try {
@@ -385,6 +402,11 @@ export function createDaemonVerbCaller(deps: {
     return `${configManager.getConfigurationIncarnation()}|${daemonTokenOverride() ?? ''}|${tokenFile}|${connectedDaemonCredentialsRevision()}:${credentialRecord}`;
   };
   const resolve = (): OperatorRpc => {
+    const refused = tuiDaemonRefusal?.();
+    if (refused) {
+      held = null;
+      return { available: false, reason: refused };
+    }
     const key = currentKey();
     if (key !== null && held?.key === key) return held.rpc;
     const rpc = resolveOperatorRpc(deps);
